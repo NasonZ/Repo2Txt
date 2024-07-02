@@ -82,15 +82,6 @@ Do you want to select sub-folders in tests? (y/n/a): n
 Fetching contents of selected files for: your-repo
 
 Repository contents saved to 'your-repo_contents.txt'.
-
-#Notes
-The script skips binary files and certain file types by default.
-If a file cannot be read due to unsupported encoding, it will be skipped with a corresponding message in the output file.
-Contributing
-Contributions are welcome! Please feel free to submit a pull request or open an issue to discuss any changes.
-
-License
-This project is licensed under the MIT License. See the LICENSE file for details.
 ```
 
 # Notes
