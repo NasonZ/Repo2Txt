@@ -5,7 +5,7 @@
 ## Features
 
 - Traverse and analyse both local directories and GitHub repositories.
-- Interactively select specific folders and files to include in the analysis.
+- Interactively select specific branches, folders and files to include in the analysis.
 - Option to include or exclude sub-folders.
 - Skips binary files and provides the option to handle different encodings for text files.
 - Excludes junk directories (e.g., `__pycache__`, `.git`, `.hg`, `.svn`, `.idea`, `.vscode`, `node_modules`).
