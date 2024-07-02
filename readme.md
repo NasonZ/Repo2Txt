@@ -1,51 +1,104 @@
-# RepoToTextForLLMs
-![hero](https://cdn.discordapp.com/attachments/1047006708813271100/1216931386032656445/im.jpeg?ex=66022eab&is=65efb9ab&hm=d472a26ec77b50ce5ee094578f888fa8b6c893bc523a5633f6987a850ae3b8d8&)
+# Repo2Txt
 
-Automates the analysis of GitHub repositories specifically tailored for usage with large context LLMs. This Python script efficiently fetches README files, repository structure, and non-binary file contents. Additionally, it provides structured outputs complete with pre-formatted prompts to guide further analysis of the repository's content.
+`Repo2Txt` is a Python script that allows you to interactively traverse and analyse the contents of a GitHub repository or a local folder. It extracts the structure and contents of selected files and folders and saves the information to a text file.
 
 ## Features
 
-- **README Retrieval:** Automatically extracts the content of README.md to provide an initial insight into the repository.
-- **Structured Repository Traversal:** Maps out the repository's structure through an iterative traversal method, ensuring thorough coverage without the limitations of recursion.
-- **Selective Content Extraction:** Retrieves text contents from files, intelligently skipping over binary files to streamline the analysis process.
+- Traverse and analyse both local directories and GitHub repositories.
+- Interactively select specific folders and files to include in the analysis.
+- Option to include or exclude sub-folders.
+- Skips binary files and provides the option to handle different encodings for text files.
+- Excludes junk directories (e.g., `__pycache__`, `.git`, `.hg`, `.svn`, `.idea`, `.vscode`, `node_modules`).
+- Saves the analysis, including repository structure and file contents, to a text file.
 
 ## Prerequisites
 
-To use **RepoToTextForLLMs**, you'll need:
+- Python 3.6 or later
+- `PyGithub` library: Install it using `pip install PyGithub`
+- `tqdm` library: Install it using `pip install tqdm`
+- GitHub Personal Access Token (PAT) for accessing private repositories
 
-- Python installed on your system.
-- The `github` Python package.
-- A GitHub Personal Access Token configured as an environment variable (`GITHUB_TOKEN`).
+## Installation
 
-## Getting Started
+1. Clone the repository or download the script.
 
-1. Ensure Python and the required package (`PyGithub`) are installed:
+    ```sh
+    git clone https://github.com/your-username/repo2txt.git
+    ```
 
-```bash
-pip install PyGithub tqdm
+2. Navigate to the directory containing the script.
+
+    ```sh
+    cd repo2txt
+    ```
+
+3. Install the required Python packages.
+
+    ```sh
+    pip install PyGithub tqdm
+    ```
+
+## Usage
+
+1. Ensure you have a GitHub Personal Access Token (PAT). Set it as an environment variable named `GITHUB_TOKEN`.
+
+    ```sh
+    export GITHUB_TOKEN='your_github_token'
+    ```
+
+2. Run the script.
+
+    ```sh
+    python repo2txt.py
+    ```
+
+3. Follow the prompts to enter the GitHub repository URL or the path to a local folder.
+
+4. Interactively select the folders and files you wish to analyse. You can choose to include or exclude sub-folders.
+
+5. The script will save the analysis, including the repository structure and file contents, to a text file in the current directory.
+
+## Example
+
+```sh
+Enter the GitHub repository URL or the path to a local folder:
+https://github.com/your-username/your-repo
+
+Fetching README for: your-repo
+
+Fetching repository structure for: your-repo
+
+Contents of :
+1. .git (dir)
+2. .github (dir)
+3. src (dir)
+4. tests (dir)
+5. README.md (file)
+
+Enter the indices of the folders/files you want to extract (e.g., 1-5,7,9-12) or 'a' for all: 3,4,5
+Do you want to select sub-folders in src? (y/n/a): a
+Do you want to select sub-folders in tests? (y/n/a): n
+
+Fetching contents of selected files for: your-repo
+
+Repository contents saved to 'your-repo_contents.txt'.
+
+#Notes
+The script skips binary files and certain file types by default.
+If a file cannot be read due to unsupported encoding, it will be skipped with a corresponding message in the output file.
+Contributing
+Contributions are welcome! Please feel free to submit a pull request or open an issue to discuss any changes.
+
+License
+This project is licensed under the MIT License. See the LICENSE file for details.
 ```
 
-2. Set your GitHub Personal Access Token as an environment variable:
+# Notes
+- The script skips binary files and certain file types by default.
+- If a file cannot be read due to unsupported encoding, it will be skipped with a corresponding message in the output file.
 
-```python
-GITHUB_TOKEN = os.getenv('GITHUB_TOKEN', 'YOUR TOKEN HERE')
-```
+# Contributing
+Contributions are welcome! Please feel free to submit a pull request or open an issue to discuss any changes.
 
-## How to Use
-
-1. Place the script in your desired directory.
-2. Execute the script in your terminal:
-
-```bash
-python repototxt.py
-```
-
-3. Enter the GitHub repository URL when prompted. The script will process the repository and output its findings, including the README, structure, and file contents (excluding binary files), accompanied by analysis prompts.
-
-## Contributing
-
-Contributions to **RepoToTextForLLMs** are welcomed. Whether it's through submitting pull requests, reporting issues, or suggesting improvements, your input helps make this tool better for everyone.
-
-## License
-
-This project is licensed under the MIT License.
+# License
+This project is licensed under the MIT License. See the LICENSE file for details.
