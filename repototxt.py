@@ -68,7 +68,7 @@ def traverse_local_repo_interactively(repo_path, selected_paths=None, excluded_d
     if selected_paths is None:
         selected_paths = set()
     if excluded_dirs is None:
-        excluded_dirs = {'__pycache__', '.git', '.hg', '.svn', '.idea', '.vscode', 'node_modules'}
+        excluded_dirs = {'__pycache__', '.git', '.hg', '.svn', '.idea', '.vscode', 'node_modules', '.lancedb'}
 
     structure = ""
     for root, dirs, files in os.walk(repo_path):
@@ -98,7 +98,6 @@ def traverse_local_repo_interactively(repo_path, selected_paths=None, excluded_d
                 rel_item_path = os.path.relpath(item_path, repo_path)
                 if os.path.isdir(item_path):
                     structure += f"{rel_item_path}/\n"
-                    selected_paths.add(rel_item_path)
                     while True:
                         sub_folders_choice = input(f"Do you want to select sub-folders in {rel_item_path}? (y/n/a): ").lower()
                         if sub_folders_choice == 'y':
@@ -113,7 +112,6 @@ def traverse_local_repo_interactively(repo_path, selected_paths=None, excluded_d
                                 for sub_dir in sub_dirs:
                                     sub_dir_path = os.path.join(rel_sub_root, sub_dir)
                                     structure += f"{sub_dir_path}/\n"
-                                    selected_paths.add(sub_dir_path)
                                 for sub_file in sub_files:
                                     sub_file_path = os.path.join(rel_sub_root, sub_file)
                                     structure += f"{sub_file_path}\n"
@@ -132,7 +130,7 @@ def traverse_local_repo_interactively(repo_path, selected_paths=None, excluded_d
                 if os.path.isdir(item_path):
                     structure += f"{rel_item_path}/ (Omitted for brevity)\n"
                 else:
-                    structure += f"{rel_item_path}\nContent: Omitted for brevity\n\n"
+                    structure += f"{rel_item_path}"
 
         break  # Exit after processing the current directory
 
@@ -179,7 +177,6 @@ def traverse_repo_interactively(repo, path="", selected_paths=None, excluded_dir
             if content.type == "dir":
                 if content.name not in excluded_dirs:
                     structure += f"{path}/{content.name}/\n"
-                    selected_paths.add(f"{path}/{content.name}/")
                     while True:
                         sub_folders_choice = input(f"Do you want to select sub-folders in {content.path}? (y/n/a): ").lower()
                         if sub_folders_choice == 'y':
@@ -194,7 +191,6 @@ def traverse_repo_interactively(repo, path="", selected_paths=None, excluded_dir
                                     if sub_content.name not in excluded_dirs:
                                         sub_dir_path = f"{content.path}/{sub_content.name}/"
                                         structure += f"{sub_dir_path}\n"
-                                        selected_paths.add(sub_dir_path)
                                         sub_structure, sub_selected_paths = traverse_repo_interactively(repo, sub_content.path, selected_paths, excluded_dirs)
                                         structure += sub_structure
                                         selected_paths.update(sub_selected_paths)
@@ -313,15 +309,21 @@ def get_selected_file_contents(repo, selected_files, is_local=False):
         '.csv', '.tsv', '.json', '.xml', '.yaml', '.yml',
     ]
 
-    for file_path in tqdm(selected_files, desc="Downloading files"):
+    for file_path in tqdm(selected_files, desc="Reviewing files"):
         try:
             if is_local:
                 full_path = os.path.join(repo, file_path)
+                if os.path.isdir(full_path):
+                    file_contents += f"File: {file_path}\nContent: Skipped (directory)\n\n"
+                    continue
                 with open(full_path, 'r', encoding='utf-8') as f:
                     content = f.read()
                 file_contents += f"File: {file_path}\nContent:\n{content}\n\n"
             else:
                 content = repo.get_contents(file_path)
+                if content.type == "dir":
+                    file_contents += f"File: {file_path}\nContent: Skipped (directory)\n\n"
+                    continue
                 if any(content.name.endswith(ext) for ext in binary_extensions):
                     file_contents += f"File: {file_path}\nContent: Skipped binary file\n\n"
                 else:
@@ -342,7 +344,7 @@ def get_selected_file_contents(repo, selected_files, is_local=False):
                     except (AttributeError, UnicodeDecodeError):
                         file_contents += "Content: Skipped due to decoding error or missing decoded_content\n\n"
         except Exception as e:
-            print(f"Error downloading file {file_path}: {e}")
+            print(f"Error reviewing file {file_path}: {e}")
             file_contents += f"File: {file_path}\nContent: Skipped due to error: {e}\n\n"
     return file_contents
 
@@ -416,7 +418,7 @@ def main():
             with open(output_filename, 'w', encoding='utf-8') as f:
                 f.write(instructions)
                 f.write(f"README:\n{readme_content}\n\n")
-                f.write(repo_structure)
+                f.write(f"Repo structure:\n{repo_structure}\n\n")
                 f.write('\n\n')
                 f.write(file_contents)
             print(f"Repository contents saved to '{output_filename}'.")
