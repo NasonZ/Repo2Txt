@@ -313,12 +313,12 @@ def get_selected_file_contents(repo, selected_files, is_local=False):
         try:
             if is_local:
                 full_path = os.path.join(repo, file_path)
-                if os.path.isdir(full_path):
-                    file_contents += f"File: {file_path}\nContent: Skipped (directory)\n\n"
-                    continue
-                with open(full_path, 'r', encoding='utf-8') as f:
-                    content = f.read()
-                file_contents += f"File: {file_path}\nContent:\n{content}\n\n"
+                if any(file_path.endswith(ext) for ext in binary_extensions):
+                    file_contents += f"File: {file_path}\nContent: Skipped binary file\n\n"
+                else:
+                    with open(full_path, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                    file_contents += f"File: {file_path}\nContent:\n{content}\n\n"
             else:
                 content = repo.get_contents(file_path)
                 if content.type == "dir":
