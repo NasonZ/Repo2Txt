@@ -296,7 +296,7 @@ def get_selected_file_contents(repo, selected_files, is_local=False):
         '.nupkg', '.snupkg', '.vsix',
         '.bpl', '.dcu', '.dcp', '.dcpil', '.drc',
         '.DS_Store', '.localized',
-        '.manifest', '.lance'
+        '.manifest', '.lance', '.txt',
         # Note-taking application files
         '.one', '.notebook', '.nmbak',  # Microsoft OneNote
         '.enex',  # Evernote
@@ -414,6 +414,7 @@ def main():
         branch = None
         try:
             repo_name, instructions, readme_content, repo_structure, file_contents = get_repo_contents(repo_path_or_url, branch)
+            #print(f"file_contents: {file_contents}")
             output_filename = f'{repo_name}_contents.txt'
             with open(output_filename, 'w', encoding='utf-8') as f:
                 f.write(instructions)
@@ -443,7 +444,7 @@ def main():
             branch_choice = int(input("Enter the number of the branch you want to analyse (or 0 for default branch): "))
             branch = branches[branch_choice - 1] if branch_choice > 0 else None
             
-            branch_info = f" (branch: {branch})" if branch else ""
+            branch_info = f"_{branch} " if branch else ""
             repo_name, instructions, readme_content, repo_structure, file_contents = get_repo_contents(repo_path_or_url, branch)
             output_filename = f'{repo_name}{branch_info.replace(" ", "_")}_contents.txt'
             with open(output_filename, 'w', encoding='utf-8') as f:
