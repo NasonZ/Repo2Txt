@@ -87,6 +87,7 @@ Repository contents saved to 'your-repo_contents.txt'.
 # Notes
 - The script skips binary files and certain file types by default.
 - If a file cannot be read due to unsupported encoding, it will be skipped with a corresponding message in the output file.
+- This repo is forked adjusted from - https://github.com/Doriandarko/RepoToTextForLLMs
 
 # Contributing
 Contributions are welcome! Please feel free to submit a pull request or open an issue to discuss any changes.
