@@ -53,12 +53,13 @@ def parse_range(range_str):
     except ValueError:
         return []
 
-def traverse_local_repo_interactively(repo_path, selected_paths=None, excluded_dirs=None):
+def traverse_local_repo_interactively(repo_path, current_path="", selected_paths=None, excluded_dirs=None):
     """
     Traverse the local repository interactively, allowing user to select folders and files.
 
     Args:
-        repo_path: The local repository path.
+        repo_path: The root path of the local repository.
+        current_path: The current path relative to repo_path being traversed.
         selected_paths: A set to store selected paths (optional).
         excluded_dirs: A set of directories to exclude (optional).
 
@@ -71,15 +72,20 @@ def traverse_local_repo_interactively(repo_path, selected_paths=None, excluded_d
         excluded_dirs = {'__pycache__', '.git', '.hg', '.svn', '.idea', '.vscode', 'node_modules', '.lancedb'}
 
     structure = ""
-    for root, dirs, files in os.walk(repo_path):
-        dirs[:] = [d for d in dirs if d not in excluded_dirs]  # Exclude specific directories
-        rel_root = os.path.relpath(root, repo_path)
-        if rel_root == '.':
-            rel_root = ''
-        print(f"\nContents of {rel_root}:")
-        items = dirs + files
-        for i, item in enumerate(items, start=1):
-            print(f"{i}. {item} ({'dir' if item in dirs else 'file'})")
+    full_path = os.path.join(repo_path, current_path)
+    
+    try:
+        items = []
+        for item in os.listdir(full_path):
+            item_path = os.path.join(full_path, item)
+            if os.path.isdir(item_path) and item not in excluded_dirs:
+                items.append((item, 'dir'))
+            elif os.path.isfile(item_path):
+                items.append((item, 'file'))
+
+        print(f"\nContents of {current_path or '.'}:")
+        for i, (item, item_type) in enumerate(items, start=1):
+            print(f"{i}. {item} ({item_type})")
 
         while True:
             selected_indices = input("Enter the indices of the folders/files you want to extract (e.g., 1-5,7,9-12) or 'a' for all: ")
@@ -92,28 +98,33 @@ def traverse_local_repo_interactively(repo_path, selected_paths=None, excluded_d
                     break
                 print("Invalid input. Please enter the indices in the correct format (e.g., 1-3,5).")
 
-        for i, item in enumerate(items, start=1):
+        for i, (item, item_type) in enumerate(items, start=1):
             if i in selected_indices:
-                item_path = os.path.join(root, item)
+                item_path = os.path.join(full_path, item)
                 rel_item_path = os.path.relpath(item_path, repo_path)
-                if os.path.isdir(item_path):
+                if item_type == 'dir':
                     structure += f"{rel_item_path}/\n"
                     while True:
                         sub_folders_choice = input(f"Do you want to select sub-folders in {rel_item_path}? (y/n/a): ").lower()
                         if sub_folders_choice == 'y':
-                            sub_structure, sub_selected_paths = traverse_local_repo_interactively(item_path, selected_paths, excluded_dirs)
+                            sub_structure, sub_selected_paths = traverse_local_repo_interactively(
+                                repo_path, 
+                                os.path.join(current_path, item), 
+                                selected_paths, 
+                                excluded_dirs
+                            )
                             structure += sub_structure
                             selected_paths.update(sub_selected_paths)
                             break
                         elif sub_folders_choice == 'a':
-                            for sub_root, sub_dirs, sub_files in os.walk(item_path):
-                                sub_dirs[:] = [d for d in sub_dirs if d not in excluded_dirs]  # Exclude specific directories
-                                rel_sub_root = os.path.relpath(sub_root, repo_path)
-                                for sub_dir in sub_dirs:
-                                    sub_dir_path = os.path.join(rel_sub_root, sub_dir)
+                            for root, dirs, files in os.walk(item_path):
+                                dirs[:] = [d for d in dirs if d not in excluded_dirs]
+                                rel_root = os.path.relpath(root, repo_path)
+                                for sub_dir in dirs:
+                                    sub_dir_path = os.path.join(rel_root, sub_dir)
                                     structure += f"{sub_dir_path}/\n"
-                                for sub_file in sub_files:
-                                    sub_file_path = os.path.join(rel_sub_root, sub_file)
+                                for sub_file in files:
+                                    sub_file_path = os.path.join(rel_root, sub_file)
                                     structure += f"{sub_file_path}\n"
                                     selected_paths.add(sub_file_path)
                             break
@@ -125,14 +136,17 @@ def traverse_local_repo_interactively(repo_path, selected_paths=None, excluded_d
                     structure += f"{rel_item_path}\n"
                     selected_paths.add(rel_item_path)
             else:
-                item_path = os.path.join(root, item)
+                item_path = os.path.join(full_path, item)
                 rel_item_path = os.path.relpath(item_path, repo_path)
-                if os.path.isdir(item_path):
+                if item_type == 'dir':
                     structure += f"{rel_item_path}/ (Omitted for brevity)\n"
                 else:
-                    structure += f"{rel_item_path}"
+                    structure += f"{rel_item_path}\n"
 
-        break  # Exit after processing the current directory
+    except PermissionError:
+        print(f"Permission denied to access {full_path}. Skipping.")
+    except Exception as e:
+        print(f"An error occurred while processing {full_path}: {str(e)}. Skipping.")
 
     return structure, selected_paths
 
