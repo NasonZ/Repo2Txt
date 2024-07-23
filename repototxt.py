@@ -3,6 +3,7 @@ import sys
 import argparse
 from github import Github
 from tqdm import tqdm
+import tiktoken
 
 # Set your GitHub token here
 GITHUB_TOKEN = os.getenv('GITHUB_TOKEN', 'xxx')
@@ -53,7 +54,21 @@ def parse_range(range_str):
     except ValueError:
         return []
 
-def traverse_local_repo_interactively(repo_path, current_path="", selected_paths=None, excluded_dirs=None):
+def count_tokens(text):
+    """
+    Count the number of tokens in the given text using the cl100k_base encoding.
+
+    Args:
+        text: The input text to tokenize.
+
+    Returns:
+        The number of tokens in the text.
+    """
+    enc = tiktoken.get_encoding("cl100k_base")
+    tokens = enc.encode(text)
+    return len(tokens)
+
+def traverse_local_repo_interactively(repo_path, current_path="", selected_paths=None, excluded_dirs=None, count_tokens_flag=False):
     """
     Traverse the local repository interactively, allowing user to select folders and files.
 
@@ -62,18 +77,20 @@ def traverse_local_repo_interactively(repo_path, current_path="", selected_paths
         current_path: The current path relative to repo_path being traversed.
         selected_paths: A set to store selected paths (optional).
         excluded_dirs: A set of directories to exclude (optional).
+        count_tokens_flag: Whether to count tokens for files (optional).
 
     Returns:
-        The structure of the repository and the selected paths.
+        The structure of the repository, the selected paths, and token data (if counting tokens).
     """
     if selected_paths is None:
         selected_paths = set()
     if excluded_dirs is None:
-        excluded_dirs = {'__pycache__', '.git', '.hg', '.svn', '.idea', '.vscode', 'node_modules', '.lancedb'}
+        excluded_dirs = {'__pycache__', '.git', '.hg', '.svn', '.idea', '.vscode', 'node_modules'}
 
     structure = ""
+    token_data = {}
     full_path = os.path.join(repo_path, current_path)
-    
+
     try:
         items = []
         for item in os.listdir(full_path):
@@ -107,14 +124,16 @@ def traverse_local_repo_interactively(repo_path, current_path="", selected_paths
                     while True:
                         sub_folders_choice = input(f"Do you want to select sub-folders in {rel_item_path}? (y/n/a): ").lower()
                         if sub_folders_choice == 'y':
-                            sub_structure, sub_selected_paths = traverse_local_repo_interactively(
+                            sub_structure, sub_selected_paths, sub_token_data = traverse_local_repo_interactively(
                                 repo_path, 
                                 os.path.join(current_path, item), 
                                 selected_paths, 
-                                excluded_dirs
+                                excluded_dirs,
+                                count_tokens_flag
                             )
                             structure += sub_structure
                             selected_paths.update(sub_selected_paths)
+                            token_data.update(sub_token_data)
                             break
                         elif sub_folders_choice == 'a':
                             for root, dirs, files in os.walk(item_path):
@@ -127,6 +146,14 @@ def traverse_local_repo_interactively(repo_path, current_path="", selected_paths
                                     sub_file_path = os.path.join(rel_root, sub_file)
                                     structure += f"{sub_file_path}\n"
                                     selected_paths.add(sub_file_path)
+                                    if count_tokens_flag:
+                                        try:
+                                            with open(os.path.join(root, sub_file), 'r', encoding='utf-8') as f:
+                                                content = f.read()
+                                            token_count = count_tokens(content)
+                                            token_data[sub_file_path] = token_count
+                                        except Exception as e:
+                                            print(f"Error counting tokens in {sub_file_path}: {e}")
                             break
                         elif sub_folders_choice == 'n':
                             break
@@ -135,6 +162,14 @@ def traverse_local_repo_interactively(repo_path, current_path="", selected_paths
                 else:
                     structure += f"{rel_item_path}\n"
                     selected_paths.add(rel_item_path)
+                    if count_tokens_flag:
+                        try:
+                            with open(item_path, 'r', encoding='utf-8') as f:
+                                content = f.read()
+                            token_count = count_tokens(content)
+                            token_data[rel_item_path] = token_count
+                        except Exception as e:
+                            print(f"Error counting tokens in {rel_item_path}: {e}")
             else:
                 item_path = os.path.join(full_path, item)
                 rel_item_path = os.path.relpath(item_path, repo_path)
@@ -148,9 +183,9 @@ def traverse_local_repo_interactively(repo_path, current_path="", selected_paths
     except Exception as e:
         print(f"An error occurred while processing {full_path}: {str(e)}. Skipping.")
 
-    return structure, selected_paths
+    return structure, selected_paths, token_data
 
-def traverse_repo_interactively(repo, path="", selected_paths=None, excluded_dirs=None):
+def traverse_repo_interactively(repo, path="", selected_paths=None, excluded_dirs=None, count_tokens_flag=False):
     """
     Traverse the GitHub repository interactively, allowing user to select folders and files.
 
@@ -159,9 +194,10 @@ def traverse_repo_interactively(repo, path="", selected_paths=None, excluded_dir
         path: The current path in the repository.
         selected_paths: A set to store selected paths (optional).
         excluded_dirs: A set of directories to exclude (optional).
+        count_tokens_flag: Whether to count tokens for files (optional).
 
     Returns:
-        The structure of the repository and the selected paths.
+        The structure of the repository, the selected paths, and token data (if counting tokens).
     """
     if selected_paths is None:
         selected_paths = set()
@@ -169,6 +205,7 @@ def traverse_repo_interactively(repo, path="", selected_paths=None, excluded_dir
         excluded_dirs = {'__pycache__', '.git', '.hg', '.svn', '.idea', '.vscode', 'node_modules'}
 
     structure = ""
+    token_data = {}
     contents = repo.get_contents(path)
 
     print(f"\nContents of {path}:")
@@ -194,9 +231,16 @@ def traverse_repo_interactively(repo, path="", selected_paths=None, excluded_dir
                     while True:
                         sub_folders_choice = input(f"Do you want to select sub-folders in {content.path}? (y/n/a): ").lower()
                         if sub_folders_choice == 'y':
-                            sub_structure, sub_selected_paths = traverse_repo_interactively(repo, content.path, selected_paths, excluded_dirs)
+                            sub_structure, sub_selected_paths, sub_token_data = traverse_repo_interactively(
+                                repo, 
+                                content.path, 
+                                selected_paths, 
+                                excluded_dirs,
+                                count_tokens_flag
+                            )
                             structure += sub_structure
                             selected_paths.update(sub_selected_paths)
+                            token_data.update(sub_token_data)
                             break
                         elif sub_folders_choice == 'a':
                             sub_contents = repo.get_contents(content.path)
@@ -205,13 +249,27 @@ def traverse_repo_interactively(repo, path="", selected_paths=None, excluded_dir
                                     if sub_content.name not in excluded_dirs:
                                         sub_dir_path = f"{content.path}/{sub_content.name}/"
                                         structure += f"{sub_dir_path}\n"
-                                        sub_structure, sub_selected_paths = traverse_repo_interactively(repo, sub_content.path, selected_paths, excluded_dirs)
+                                        sub_structure, sub_selected_paths, sub_token_data = traverse_repo_interactively(
+                                            repo, 
+                                            sub_content.path, 
+                                            selected_paths, 
+                                            excluded_dirs,
+                                            count_tokens_flag
+                                        )
                                         structure += sub_structure
                                         selected_paths.update(sub_selected_paths)
+                                        token_data.update(sub_token_data)
                                 else:
                                     sub_file_path = f"{content.path}/{sub_content.name}"
                                     structure += f"{sub_file_path}\n"
                                     selected_paths.add(sub_file_path)
+                                    if count_tokens_flag:
+                                        try:
+                                            decoded_content = sub_content.decoded_content.decode('utf-8')
+                                            token_count = count_tokens(decoded_content)
+                                            token_data[sub_file_path] = token_count
+                                        except Exception as e:
+                                            print(f"Error counting tokens in {sub_file_path}: {e}")
                             break
                         elif sub_folders_choice == 'n':
                             break
@@ -220,15 +278,22 @@ def traverse_repo_interactively(repo, path="", selected_paths=None, excluded_dir
             else:
                 structure += f"{path}/{content.name}\n"
                 selected_paths.add(f"{path}/{content.name}")
+                if count_tokens_flag:
+                    try:
+                        decoded_content = content.decoded_content.decode('utf-8')
+                        token_count = count_tokens(decoded_content)
+                        token_data[f"{path}/{content.name}"] = token_count
+                    except Exception as e:
+                        print(f"Error counting tokens in {path}/{content.name}: {e}")
         else:
             if content.type == "dir":
                 structure += f"{path}/{content.name}/ (Omitted for brevity)\n"
             else:
                 structure += f"{path}/{content.name}\nContent: Omitted for brevity\n\n"
 
-    return structure, selected_paths
+    return structure, selected_paths, token_data
 
-def get_selected_file_contents(repo, selected_files, is_local=False):
+def get_selected_file_contents(repo, selected_files, is_local=False, count_tokens_flag=False):
     """
     Get the contents of the selected files.
 
@@ -236,91 +301,40 @@ def get_selected_file_contents(repo, selected_files, is_local=False):
         repo: The repository object or local path.
         selected_files: A list of selected files.
         is_local: A flag indicating if the repository is local.
+        count_tokens_flag: Whether to count tokens for files.
 
     Returns:
-        The contents of the selected files.
+        The contents of the selected files and token data (if counting tokens).
     """
     file_contents = ""
+    token_data = {}
     binary_extensions = [
-        # Compiled executables and libraries
-        '.exe', '.dll', '.so', '.a', '.lib', '.dylib', '.o', '.obj',
-        # Compressed archives
-        '.zip', '.tar', '.tar.gz', '.tgz', '.rar', '.7z', '.bz2', '.gz', '.xz', '.z', '.lz', '.lzma', '.lzo', '.rz', '.sz', '.dz',
-        # Application-specific files
-        '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.odt', '.ods', '.odp',
-        # Media files
-        '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tiff', '.webp', '.svg',
-        '.mp3', '.mp4', '.wav', '.flac', '.ogg', '.avi', '.mkv', '.mov', '.webm', '.wmv', '.m4a', '.aac',
-        '.eps', '.ai',
-        # Virtual machine and container images
-        '.iso', '.vmdk', '.qcow2', '.vdi', '.vhd', '.vhdx', '.ova', '.ovf',
-        # Database files
-        '.db', '.sqlite', '.mdb', '.accdb', '.frm', '.ibd', '.dbf', '.sql',
-        # Java-related files
-        '.jar', '.class', '.war', '.ear', '.jpi',
-        # Python bytecode and packages
-        '.pyc', '.pyo', '.pyd', '.egg', '.whl',
-        # Other programming language-specific files
-        '.o', '.ko', '.obj', '.elf', '.lib', '.a', '.la', '.lo', '.dll', '.so', '.dylib',
-        '.exe', '.out', '.app', '.sl', '.framework',
-        # Font files
-        '.eot', '.otf', '.ttf', '.woff', '.woff2',
-        # Icon files
-        '.ico', '.icns', '.cur',
-        # Windows-specific files
-        '.cab', '.dmp', '.sys', '.msi', '.msix', '.msp', '.msm', '.msu',
-        # macOS-specific files
-        '.dmg', '.pkg',
-        # Linux package files
-        '.deb', '.rpm', '.snap', '.flatpak', '.appimage',
-        # Android package files
-        '.apk', '.aab',
-        # iOS package files
-        '.ipa',
-        # Certificate and key files
-        '.pem', '.crt', '.ca-bundle', '.p7b', '.p7c', '.p12', '.pfx',
-        '.cer', '.der', '.key', '.keystore', '.jks', '.p8', '.sig',
-        # Version control system files
-        '.svn', '.git', '.gitignore', '.gitattributes', '.gitmodules',
-        # IDE and editor files
-        '.iml', '.ipr', '.iws', '.project', '.cproject', '.buildpath',
-        '.classpath', '.metadata', '.settings', '.idea', '.vscode',
-        # Build output directories
-        'bin/', 'obj/', 'build/', 'dist/', 'target/',
-        # Dependency directories
-        '/node_modules/', 'vendor/', 'packages/',
-        # Log files
-        '.log', '.tlog',
-        # Temporary files
-        '.tmp', '.temp', '.swp', '.bak', '.cache',
-        # Configuration files
-        '.ini', '.cfg', '.config', '.conf', '.properties', '.prefs',
-        '.htaccess', '.htpasswd', '.env', '.dockerignore',
-        # Documentation files
-        '.chm', '.epub', '.mobi',
-        # Disk image files
-        '.img', '.iso', '.vcd',
-        # Backup files
-        '.bak', '.gho', '.ori', '.orig',
-        # Miscellaneous
-        '.dat', '.data', '.dump', '.bin', '.raw',
-        '.crx', '.xpi', '.lockb', 'package-lock.json',
-        '.rlib', '.pdb', '.idb', '.ilk', '.exp', '.map',
-        '.sdf', '.suo', '.VC.db', '.aps', '.res', '.rc',
-        '.nupkg', '.snupkg', '.vsix',
-        '.bpl', '.dcu', '.dcp', '.dcpil', '.drc',
-        '.DS_Store', '.localized',
-        '.manifest', '.lance', '.txt',
-        # Note-taking application files
-        '.one', '.notebook', '.nmbak',  # Microsoft OneNote
-        '.enex',  # Evernote
-        '.nd',  # Notability
-        '.gdoc', '.gsheet', '.gslides',  # Google Docs/Sheets/Slides
-        '.ipynb',  # Jupyter Notebook
-        '.qvnotebook',  # Quiver
-        '.bear',  # Bear
-        # Large text files that might cause issues
-        '.csv', '.tsv', '.json', '.xml', '.yaml', '.yml',
+        '.exe', '.dll', '.so', '.a', '.lib', '.dylib', '.o', '.obj', '.zip', '.tar', '.tar.gz', '.tgz', 
+        '.rar', '.7z', '.bz2', '.gz', '.xz', '.z', '.lz', '.lzma', '.lzo', '.rz', '.sz', '.dz', 
+        '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.odt', '.ods', '.odp', 
+        '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tiff', '.webp', '.svg', '.mp3', '.mp4', 
+        '.wav', '.flac', '.ogg', '.avi', '.mkv', '.mov', '.webm', '.wmv', '.m4a', '.aac', 
+        '.eps', '.ai', '.iso', '.vmdk', '.qcow2', '.vdi', '.vhd', '.vhdx', '.ova', '.ovf', 
+        '.db', '.sqlite', '.mdb', '.accdb', '.frm', '.ibd', '.dbf', '.sql', '.jar', '.class', 
+        '.war', '.ear', '.jpi', '.pyc', '.pyo', '.pyd', '.egg', '.whl', '.o', '.ko', '.obj', 
+        '.elf', '.lib', '.a', '.la', '.lo', '.dll', '.so', '.dylib', '.exe', '.out', '.app', 
+        '.sl', '.framework', '.eot', '.otf', '.ttf', '.woff', '.woff2', '.ico', '.icns', '.cur', 
+        '.cab', '.dmp', '.sys', '.msi', '.msix', '.msp', '.msm', '.msu', '.dmg', '.pkg', 
+        '.deb', '.rpm', '.snap', '.flatpak', '.appimage', '.apk', '.aab', '.ipa', '.pem', 
+        '.crt', '.ca-bundle', '.p7b', '.p7c', '.p12', '.pfx', '.cer', '.der', '.key', '.keystore', 
+        '.jks', '.p8', '.sig', '.svn', '.git', '.gitignore', '.gitattributes', '.gitmodules', 
+        '.iml', '.ipr', '.iws', '.project', '.cproject', '.buildpath', '.classpath', 
+        '.metadata', '.settings', '.idea', '.vscode', 'bin/', 'obj/', 'build/', 'dist/', 
+        'target/', '/node_modules/', 'vendor/', 'packages/', '.log', '.tlog', '.tmp', '.temp', 
+        '.swp', '.bak', '.cache', '.ini', '.cfg', '.config', '.conf', '.properties', '.prefs', 
+        '.htaccess', '.htpasswd', '.env', '.dockerignore', '.chm', '.epub', '.mobi', '.img', 
+        '.iso', '.vcd', '.bak', '.gho', '.ori', '.orig', '.dat', '.data', '.dump', '.bin', 
+        '.raw', '.crx', '.xpi', '.lockb', 'package-lock.json', '.rlib', '.pdb', '.idb', 
+        '.ilk', '.exp', '.map', '.sdf', '.suo', '.VC.db', '.aps', '.res', '.rc', '.nupkg', 
+        '.snupkg', '.vsix', '.bpl', '.dcu', '.dcp', '.dcpil', '.drc', '.DS_Store', 
+        '.localized', '.manifest', '.lance', '.txt', '.one', '.notebook', '.nmbak', '.enex', 
+        '.nd', '.gdoc', '.gsheet', '.gslides', '.ipynb', '.qvnotebook', '.bear', '.csv', 
+        '.tsv', '.json', '.xml', '.yaml', '.yml'
     ]
 
     for file_path in tqdm(selected_files, desc="Reviewing files"):
@@ -333,6 +347,9 @@ def get_selected_file_contents(repo, selected_files, is_local=False):
                     with open(full_path, 'r', encoding='utf-8') as f:
                         content = f.read()
                     file_contents += f"File: {file_path}\nContent:\n{content}\n\n"
+                    if count_tokens_flag:
+                        token_count = count_tokens(content)
+                        token_data[file_path] = token_count
             else:
                 content = repo.get_contents(file_path)
                 if content.type == "dir":
@@ -349,10 +366,16 @@ def get_selected_file_contents(repo, selected_files, is_local=False):
                             try:
                                 decoded_content = content.decoded_content.decode('utf-8')
                                 file_contents += f"Content:\n{decoded_content}\n\n"
+                                if count_tokens_flag:
+                                    token_count = count_tokens(decoded_content)
+                                    token_data[file_path] = token_count
                             except UnicodeDecodeError:
                                 try:
                                     decoded_content = content.decoded_content.decode('latin-1')
                                     file_contents += f"Content (Latin-1 Decoded):\n{decoded_content}\n\n"
+                                    if count_tokens_flag:
+                                        token_count = count_tokens(decoded_content)
+                                        token_data[file_path] = token_count
                                 except UnicodeDecodeError:
                                     file_contents += "Content: Skipped due to unsupported encoding\n\n"
                     except (AttributeError, UnicodeDecodeError):
@@ -360,15 +383,135 @@ def get_selected_file_contents(repo, selected_files, is_local=False):
         except Exception as e:
             print(f"Error reviewing file {file_path}: {e}")
             file_contents += f"File: {file_path}\nContent: Skipped due to error: {e}\n\n"
-    return file_contents
+    return file_contents, token_data
 
-def get_repo_contents(repo_path_or_url, branch=None):
+def generate_tree_representation(token_data):
+    """
+    Generate a tree representation of the repository structure with token counts.
+
+    Args:
+        token_data: A dictionary mapping file paths to token counts.
+
+    Returns:
+        A string representing the tree structure with token counts.
+    """
+    tree = {}
+    total_tokens = 0
+    total_files = 0
+    for path, count in token_data.items():
+        total_tokens += count
+        total_files += 1
+        parts = path.split(os.path.sep)
+        current = tree
+        for part in parts[:-1]:
+            if part not in current:
+                current[part] = {"__token_count": 0, "__files": 0}
+            current = current[part]
+        current[parts[-1]] = {"__token_count": count, "__files": 1}
+        
+        current = tree
+        for part in parts[:-1]:
+            current[part]["__token_count"] += count
+            current[part]["__files"] += 1
+            current = current[part]
+    
+    def print_tree(node, indent=""):
+        output = ""
+        items = sorted(node.items())
+        for i, (key, value) in enumerate(items):
+            if key == "__token_count" or key == "__files":
+                continue
+            is_last = (i == len(items) - 1)
+            if isinstance(value, dict) and "__token_count" in value:
+                token_count = value["__token_count"]
+                file_count = value["__files"]
+                branch = "└── " if is_last else "├── "
+                if file_count > 1:  # It's a directory
+                    output += f"{indent}{branch}{key}/ (Tokens: {token_count}, Files: {file_count})\n"
+                else:  # It's a file
+                    output += f"{indent}{branch}{key} (Tokens: {token_count})\n"
+                if file_count > 1:  # Only recurse if it's a directory
+                    sub_indent = indent + ("    " if is_last else "│   ")
+                    output += print_tree(value, sub_indent)
+            else:
+                branch = "└── " if is_last else "├── "
+                output += f"{indent}{branch}{key} (Tokens: {value['__token_count']})\n"
+        return output
+
+    tree_output = print_tree(tree)
+    tree_output += f"\nTOTAL: {total_tokens} tokens, {total_files} files"
+    return tree_output
+
+def generate_summary_table(token_data):
+    """
+    Generate a summary table of token counts for files and directories.
+
+    Args:
+        token_data: A dictionary mapping file paths to token counts.
+
+    Returns:
+        A string representing the summary table.
+    """
+    summary = "Token Count Summary:\n"
+    summary += "-------------------\n"
+    summary += f"{'File/Directory':<70} | {'Token Count':>12} | {'File Count':>10}\n"
+    summary += "-" * 98 + "\n"
+
+    tree = {}
+    total_tokens = 0
+    total_files = 0
+    for path, count in token_data.items():
+        total_tokens += count
+        total_files += 1
+        parts = path.split(os.path.sep)
+        current = tree
+        for part in parts[:-1]:
+            if part not in current:
+                current[part] = {"__token_count": 0, "__files": 0}
+            current = current[part]
+        current[parts[-1]] = {"__token_count": count, "__files": 1}
+        
+        current = tree
+        for part in parts[:-1]:
+            current[part]["__token_count"] += count
+            current[part]["__files"] += 1
+            current = current[part]
+
+    def process_tree(node, path="", level=0):
+        nonlocal summary
+        items = sorted(node.items())
+        for i, (key, value) in enumerate(items):
+            if key == "__token_count" or key == "__files":
+                continue
+            full_path = os.path.join(path, key)
+            indent = "  " * level
+            display_path = indent + full_path
+            if isinstance(value, dict):
+                token_count = value["__token_count"]
+                file_count = value["__files"]
+                if level == 0:
+                    summary += "-" * 98 + "\n"
+                summary += f"{display_path:<70} | {token_count:>12} | {file_count:>10}\n"
+                process_tree(value, full_path, level + 1)
+            else:
+                summary += f"{display_path:<70} | {value['__token_count']:>12} | {1:>10}\n"
+
+    process_tree(tree)
+    
+    # Add the overall total at the end
+    summary += "-" * 98 + "\n"
+    summary += f"{'TOTAL':<70} | {total_tokens:>12} | {total_files:>10}\n"
+    
+    return summary
+
+def get_repo_contents(repo_path_or_url, branch=None, count_tokens_flag=False):
     """
     Main function to get repository contents.
 
     Args:
         repo_path_or_url: The GitHub repository URL or local path.
         branch: The branch name (optional).
+        count_tokens_flag: Whether to count tokens for files.
 
     Returns:
         The repository name, instructions, README content, repository structure, and file contents.
@@ -393,12 +536,26 @@ def get_repo_contents(repo_path_or_url, branch=None):
 
     print(f"\nFetching repository structure for: {repo_name}{branch_info}")
     if is_local:
-        repo_structure, selected_paths = traverse_local_repo_interactively(repo)
+        repo_structure, selected_paths, token_data = traverse_local_repo_interactively(repo, count_tokens_flag=count_tokens_flag)
     else:
-        repo_structure, selected_paths = traverse_repo_interactively(repo)
+        repo_structure, selected_paths, token_data = traverse_repo_interactively(repo, count_tokens_flag=count_tokens_flag)
 
     print(f"\nFetching contents of selected files for: {repo_name}{branch_info}")
-    file_contents = get_selected_file_contents(repo, selected_paths, is_local)
+    file_contents, file_token_data = get_selected_file_contents(repo, selected_paths, is_local, count_tokens_flag)
+    
+    if count_tokens_flag:
+        token_data.update(file_token_data)
+        tree_representation = generate_tree_representation(token_data)
+        summary_table = generate_summary_table(token_data)
+        
+        token_output_filename = f'{repo_name}_token_data.txt'
+        with open(token_output_filename, 'w', encoding='utf-8') as f:
+            f.write("Token Data Tree Representation:\n")
+            f.write("--------------------------------\n")
+            f.write(tree_representation)
+            f.write("\n\n")
+            f.write(summary_table)
+        print(f"Token data saved to '{token_output_filename}'.")
 
     instructions = f"Prompt: Analyse the {repo_name}{branch_info} repository to understand its structure, purpose, and functionality. Follow these steps to study the codebase:\n\n"
     instructions += "1. Read the README file to gain an overview of the project, its goals, and any setup instructions.\n\n"
@@ -416,19 +573,20 @@ def get_repo_contents(repo_path_or_url, branch=None):
     return repo_name, instructions, readme_content, repo_structure, file_contents
 
 def main():
+    """
+    Main function to parse command-line arguments and execute the script.
+    """
     parser = argparse.ArgumentParser(description='Interactively traverse and analyse the contents of a GitHub repository or local folder.')
     parser.add_argument('repo_path_or_url', type=str, help='The GitHub repository URL or the path to a local folder')
+    parser.add_argument('--count-tokens', action='store_true', help='Count tokens in files and generate token statistics')
     args = parser.parse_args()
 
     repo_path_or_url = args.repo_path_or_url
+    count_tokens_flag = args.count_tokens
 
     if os.path.isdir(repo_path_or_url):
-        print(f"repo_path_or_url: {repo_path_or_url}")
-        # Local folder
-        branch = None
         try:
-            repo_name, instructions, readme_content, repo_structure, file_contents = get_repo_contents(repo_path_or_url, branch)
-            #print(f"file_contents: {file_contents}")
+            repo_name, instructions, readme_content, repo_structure, file_contents = get_repo_contents(repo_path_or_url, count_tokens_flag=count_tokens_flag)
             output_filename = f'{repo_name}_contents.txt'
             with open(output_filename, 'w', encoding='utf-8') as f:
                 f.write(instructions)
@@ -441,7 +599,6 @@ def main():
             print(f"An error occurred: {e}")
             print("Please check the local folder path and try again.")
     else:
-        # GitHub repository
         if not GITHUB_TOKEN:
             print("Error: GitHub token is not set. Please set the GITHUB_TOKEN environment variable or update the script.")
             sys.exit(1)
@@ -459,7 +616,7 @@ def main():
             branch = branches[branch_choice - 1] if branch_choice > 0 else None
             
             branch_info = f"_{branch} " if branch else ""
-            repo_name, instructions, readme_content, repo_structure, file_contents = get_repo_contents(repo_path_or_url, branch)
+            repo_name, instructions, readme_content, repo_structure, file_contents = get_repo_contents(repo_path_or_url, branch, count_tokens_flag)
             output_filename = f'{repo_name}{branch_info.replace(" ", "_")}_contents.txt'
             with open(output_filename, 'w', encoding='utf-8') as f:
                 f.write(instructions)
