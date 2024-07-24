@@ -5,17 +5,19 @@
 ## Features
 
 - Traverse and analyse both local directories and GitHub repositories.
-- Interactively select specific branches, folders and files to include in the analysis.
-- Option to include or exclude sub-folders.
-- Skips binary files and provides the option to handle different encodings for text files.
-- Excludes junk directories (e.g., `__pycache__`, `.git`, `.hg`, `.svn`, `.idea`, `.vscode`, `node_modules`).
 - Saves the analysis, including repository structure and file contents, to a text file.
+- Skips binary files, handles different encodings for text files, and excludes junk directories (e.g., `__pycache__`, `.git`, `.hg`, `.svn`, `.idea`, `.vscode`, `node_modules`).
 
+**Additional Features/Improvements in This Repo (not present in /Doriandarko/RepoToTextForLLMs):**
+
+- Interactively select specific branches, folders, and files for analysis, with an option to include or exclude sub-folders.
+- Count tokens for selected files and include token statistics in the analysis for easier prompt pruning.
 ## Prerequisites
 
 - Python 3.6 or later
 - `PyGithub` library: Install it using `pip install PyGithub`
 - `tqdm` library: Install it using `pip install tqdm`
+- `tiktoken` library: Install it using `pip install tiktoken`
 - GitHub Personal Access Token (PAT) for accessing private repositories
 
 ## Installation
@@ -56,7 +58,14 @@
 
 4. Interactively select the folders and files you wish to analyse. You can choose to include or exclude sub-folders.
 
-5. The script will save the analysis, including the repository structure and file contents, to a text file in the current directory.
+5. If you want to count tokens in the files, use the --count-tokens flag when running the script.
+
+   ```sh
+   python repo2txt.py --count-tokens
+   ```
+
+6. The script will save the analysis, including the repository structure, file contents, and token statistics, to a text file in the current directory.
+   
 
 ## Example
 
