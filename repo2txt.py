@@ -258,203 +258,444 @@ class RepositoryAnalyzer:
                 return "README not found."
     
     def traverse_local_interactive(self, repo_path: str, current_path: str = "") -> Tuple[str, Set[str], Dict[str, int]]:
-        """Interactive traversal of local repository"""
+        """Interactive traversal of local repository with back navigation"""
+        # Stack to track navigation history for back functionality
+        navigation_stack = []
+        
+        # Main selection state
         structure = ""
         selected_paths = set()
         token_data = {}
-        full_path = os.path.join(repo_path, current_path)
         
-        try:
-            # Get items in current directory
-            items = []
-            for item in sorted(os.listdir(full_path)):
-                if item.startswith('.') and item not in {'.github', '.gitlab'}:
-                    continue  # Skip hidden files except certain dirs
+        # Start with root directory
+        current_state = {
+            'path': current_path,
+            'structure': "",
+            'selected_paths': set(),
+            'token_data': {}
+        }
+        
+        while True:
+            full_path = os.path.join(repo_path, current_state['path'])
+            
+            try:
+                # Get items in current directory
+                items = []
+                for item in sorted(os.listdir(full_path)):
+                    if item.startswith('.') and item not in {'.github', '.gitlab'}:
+                        continue  # Skip hidden files except certain dirs
+                        
+                    item_path = os.path.join(full_path, item)
+                    if os.path.isdir(item_path):
+                        if item not in self.config.excluded_dirs:
+                            items.append((item, 'dir'))
+                    else:
+                        items.append((item, 'file'))
+                
+                if not items:
+                    if navigation_stack:
+                        # Go back automatically if directory is empty
+                        print("Empty directory, going back...")
+                        current_state = navigation_stack.pop()
+                        continue
+                    else:
+                        return structure, selected_paths, token_data
+                
+                # Display items
+                print(f"\nContents of {current_state['path'] or 'root'}:")
+                for i, (item, item_type) in enumerate(items, start=1):
+                    print(f"{i:3d}. {item} ({item_type})")
+                
+                # Show navigation options
+                print("\nOptions: Enter numbers (e.g., 1-5,7), 'a' for all, 's' to skip", end="")
+                if navigation_stack:
+                    print(", 'b' to go back", end="")
+                print(", 'q' to quit")
+                
+                # Get user selection
+                while True:
+                    selection = input("Your choice: ").strip().lower()
                     
-                item_path = os.path.join(full_path, item)
-                if os.path.isdir(item_path):
-                    if item not in self.config.excluded_dirs:
-                        items.append((item, 'dir'))
-                else:
-                    items.append((item, 'file'))
-            
-            if not items:
-                return structure, selected_paths, token_data
-            
-            # Display items
-            print(f"\nContents of {current_path or 'root'}:")
-            for i, (item, item_type) in enumerate(items, start=1):
-                print(f"{i:3d}. {item} ({item_type})")
-            
-            # Get user selection
-            while True:
-                selection = input("\nEnter selection (e.g., 1-5,7,9-12 or 'a' for all, 's' to skip): ").strip()
-                if selection.lower() == 's':
-                    return structure, selected_paths, token_data
-                elif selection.lower() == 'a':
-                    selected_indices = list(range(1, len(items) + 1))
-                    break
-                else:
-                    selected_indices = self.parse_range(selection)
-                    if selected_indices:
-                        # Validate indices
-                        if all(1 <= idx <= len(items) for idx in selected_indices):
+                    # Handle navigation commands
+                    if selection == 'q':
+                        confirm = input("Quit selection? You'll lose current selections. (y/n): ").lower()
+                        if confirm == 'y':
+                            return "", set(), {}
+                    
+                    if selection == 'b' and navigation_stack:
+                        # Go back to previous state
+                        current_state = navigation_stack.pop()
+                        break
+                    
+                    if selection == 's':
+                        # Skip this directory
+                        if navigation_stack:
+                            # Restore previous state and continue
+                            prev_state = navigation_stack.pop()
+                            return (prev_state['structure'] + structure, 
+                                   prev_state['selected_paths'] | selected_paths,
+                                   {**prev_state['token_data'], **token_data})
+                        else:
+                            return structure, selected_paths, token_data
+                    
+                    if selection == 'a':
+                        selected_indices = list(range(1, len(items) + 1))
+                        break
+                    else:
+                        selected_indices = self.parse_range(selection)
+                        if selected_indices:
+                            # Validate indices
+                            if all(1 <= idx <= len(items) for idx in selected_indices):
+                                break
+                            else:
+                                print("Invalid indices. Please try again.")
+                        else:
+                            print("Invalid input. Please use format like: 1-3,5,7")
+                
+                if selection in ['b', 'q']:
+                    continue  # Restart the loop with new/previous state
+                
+                # Process selected items
+                temp_structure = ""
+                temp_selected = set()
+                temp_tokens = {}
+                subdirs_to_explore = []
+                
+                for i, (item, item_type) in enumerate(items, start=1):
+                    item_path = os.path.join(full_path, item)
+                    rel_item_path = os.path.relpath(item_path, repo_path)
+                    
+                    if i in selected_indices:
+                        if item_type == 'dir':
+                            temp_structure += f"{rel_item_path}/\n"
+                            subdirs_to_explore.append((item, rel_item_path))
+                        else:  # file
+                            temp_structure += f"{rel_item_path}\n"
+                            temp_selected.add(rel_item_path)
+                            
+                            # Count tokens if enabled
+                            if self.config.enable_token_counting:
+                                content, error = self.file_analyzer.read_file_content(item_path)
+                                if content:
+                                    tokens = self.file_analyzer.count_tokens(content)
+                                    if tokens > 0:
+                                        temp_tokens[rel_item_path] = tokens
+                    else:
+                        # Not selected - mark as omitted
+                        if item_type == 'dir':
+                            temp_structure += f"{rel_item_path}/ (not selected)\n"
+                        else:
+                            temp_structure += f"{rel_item_path} (not selected)\n"
+                
+                # Update current state with selections
+                structure += temp_structure
+                selected_paths.update(temp_selected)
+                token_data.update(temp_tokens)
+                
+                # Now handle subdirectories
+                for subdir_name, subdir_path in subdirs_to_explore:
+                    while True:
+                        print(f"\nSelect items in '{subdir_name}'?")
+                        sub_choice = input("Options: (y)es, (n)o, (a)ll, (b)ack: ").lower()
+                        
+                        if sub_choice == 'b':
+                            # Don't process this subdirectory, but keep current selections
+                            break
+                        
+                        if sub_choice in ['y', 'n', 'a']:
+                            if sub_choice == 'y':
+                                # Save current state to stack before diving deeper
+                                navigation_stack.append({
+                                    'path': current_state['path'],
+                                    'structure': structure,
+                                    'selected_paths': selected_paths.copy(),
+                                    'token_data': token_data.copy()
+                                })
+                                
+                                # Explore subdirectory interactively
+                                sub_structure, sub_selected, sub_tokens = self.traverse_local_interactive(
+                                    repo_path, 
+                                    os.path.join(current_state['path'], subdir_name)
+                                )
+                                structure += sub_structure
+                                selected_paths.update(sub_selected)
+                                token_data.update(sub_tokens)
+                                
+                                # Restore context after subdirectory exploration
+                                if navigation_stack:
+                                    navigation_stack.pop()
+                                    
+                            elif sub_choice == 'a':
+                                # Select all files recursively
+                                for root, dirs, files in os.walk(os.path.join(full_path, subdir_name)):
+                                    # Filter excluded directories
+                                    dirs[:] = [d for d in dirs if d not in self.config.excluded_dirs]
+                                    rel_root = os.path.relpath(root, repo_path)
+                                    
+                                    for file in files:
+                                        file_path = os.path.join(rel_root, file)
+                                        structure += f"{file_path}\n"
+                                        selected_paths.add(file_path)
+                                        
+                                        # Count tokens if enabled
+                                        if self.config.enable_token_counting:
+                                            full_file_path = os.path.join(root, file)
+                                            content, error = self.file_analyzer.read_file_content(full_file_path)
+                                            if content:
+                                                tokens = self.file_analyzer.count_tokens(content)
+                                                if tokens > 0:
+                                                    token_data[file_path] = tokens
                             break
                         else:
-                            print("Invalid indices. Please try again.")
-                    else:
-                        print("Invalid input. Please use format like: 1-3,5,7")
-            
-            # Process selected items
-            for i, (item, item_type) in enumerate(items, start=1):
-                item_path = os.path.join(full_path, item)
-                rel_item_path = os.path.relpath(item_path, repo_path)
+                            print("Invalid choice. Please enter 'y', 'n', 'a', or 'b'.")
                 
-                if i in selected_indices:
-                    if item_type == 'dir':
-                        structure += f"{rel_item_path}/\n"
-                        
-                        # Ask about subdirectories
-                        while True:
-                            sub_choice = input(f"\nSelect items in '{item}'? (y/n/a for all): ").lower()
-                            if sub_choice in ['y', 'n', 'a']:
-                                break
-                            print("Please enter 'y', 'n', or 'a'")
-                        
-                        if sub_choice == 'y':
-                            sub_structure, sub_selected, sub_tokens = self.traverse_local_interactive(
-                                repo_path, os.path.join(current_path, item)
-                            )
-                            structure += sub_structure
-                            selected_paths.update(sub_selected)
-                            token_data.update(sub_tokens)
-                        elif sub_choice == 'a':
-                            # Select all files recursively
-                            for root, dirs, files in os.walk(item_path):
-                                # Filter excluded directories
-                                dirs[:] = [d for d in dirs if d not in self.config.excluded_dirs]
-                                rel_root = os.path.relpath(root, repo_path)
-                                
-                                for file in files:
-                                    file_path = os.path.join(rel_root, file)
-                                    structure += f"{file_path}\n"
-                                    selected_paths.add(file_path)
-                                    
-                                    # Count tokens if enabled
-                                    if self.config.enable_token_counting:
-                                        full_file_path = os.path.join(root, file)
-                                        content, error = self.file_analyzer.read_file_content(full_file_path)
-                                        if content:
-                                            tokens = self.file_analyzer.count_tokens(content)
-                                            if tokens > 0:
-                                                token_data[file_path] = tokens
-                    else:  # file
-                        structure += f"{rel_item_path}\n"
-                        selected_paths.add(rel_item_path)
-                        
-                        # Count tokens if enabled
-                        if self.config.enable_token_counting:
-                            content, error = self.file_analyzer.read_file_content(item_path)
-                            if content:
-                                tokens = self.file_analyzer.count_tokens(content)
-                                if tokens > 0:
-                                    token_data[rel_item_path] = tokens
+                # If we're at root level, we're done
+                if not current_state['path']:
+                    return structure, selected_paths, token_data
                 else:
-                    # Not selected - mark as omitted
-                    if item_type == 'dir':
-                        structure += f"{rel_item_path}/ (not selected)\n"
+                    # Return to parent context
+                    if navigation_stack:
+                        parent_state = navigation_stack.pop()
+                        return (parent_state['structure'] + structure,
+                               parent_state['selected_paths'] | selected_paths,
+                               {**parent_state['token_data'], **token_data})
                     else:
-                        structure += f"{rel_item_path} (not selected)\n"
-        
-        except PermissionError:
-            self.errors.append(f"Permission denied: {full_path}")
-        except Exception as e:
-            self.errors.append(f"Error in {full_path}: {str(e)}")
-        
-        return structure, selected_paths, token_data
+                        return structure, selected_paths, token_data
+            
+            except PermissionError:
+                self.errors.append(f"Permission denied: {full_path}")
+                if navigation_stack:
+                    current_state = navigation_stack.pop()
+                else:
+                    return structure, selected_paths, token_data
+            except Exception as e:
+                self.errors.append(f"Error in {full_path}: {str(e)}")
+                if navigation_stack:
+                    current_state = navigation_stack.pop()
+                else:
+                    return structure, selected_paths, token_data
     
     def traverse_github_interactive(self, repo: GithubRepo, path: str = "", branch: Optional[str] = None) -> Tuple[str, Set[str], Dict[str, int]]:
-        """Interactive traversal of GitHub repository"""
+        """Interactive traversal of GitHub repository with back navigation"""
+        # Stack to track navigation history
+        navigation_stack = []
+        
+        # Main selection state
+        structure = ""
+        selected_paths = set()
+        token_data = {}
+        
+        # Start with current directory
+        current_state = {
+            'path': path,
+            'structure': "",
+            'selected_paths': set(),
+            'token_data': {}
+        }
+        
+        while True:
+            try:
+                contents = repo.get_contents(current_state['path'], ref=branch)
+                
+                # Sort and filter contents
+                items = []
+                for content in sorted(contents, key=lambda x: (x.type != 'dir', x.name)):
+                    if content.type == 'dir' and content.name not in self.config.excluded_dirs:
+                        items.append((content, 'dir'))
+                    elif content.type == 'file':
+                        items.append((content, 'file'))
+                
+                if not items:
+                    if navigation_stack:
+                        # Go back automatically if directory is empty
+                        print("Empty directory, going back...")
+                        current_state = navigation_stack.pop()
+                        continue
+                    else:
+                        return structure, selected_paths, token_data
+                
+                # Display items
+                print(f"\nContents of {current_state['path'] or 'root'}:")
+                for i, (content, item_type) in enumerate(items, start=1):
+                    size_str = f" ({content.size:,} bytes)" if item_type == 'file' and content.size else ""
+                    print(f"{i:3d}. {content.name} ({item_type}){size_str}")
+                
+                # Show navigation options
+                print("\nOptions: Enter numbers (e.g., 1-5,7), 'a' for all, 's' to skip", end="")
+                if navigation_stack:
+                    print(", 'b' to go back", end="")
+                print(", 'q' to quit")
+                
+                # Get user selection
+                while True:
+                    selection = input("Your choice: ").strip().lower()
+                    
+                    # Handle navigation commands
+                    if selection == 'q':
+                        confirm = input("Quit selection? You'll lose current selections. (y/n): ").lower()
+                        if confirm == 'y':
+                            return "", set(), {}
+                    
+                    if selection == 'b' and navigation_stack:
+                        # Go back to previous state
+                        current_state = navigation_stack.pop()
+                        break
+                    
+                    if selection == 's':
+                        # Skip this directory
+                        if navigation_stack:
+                            # Restore previous state and continue
+                            prev_state = navigation_stack.pop()
+                            return (prev_state['structure'] + structure, 
+                                   prev_state['selected_paths'] | selected_paths,
+                                   {**prev_state['token_data'], **token_data})
+                        else:
+                            return structure, selected_paths, token_data
+                    
+                    if selection == 'a':
+                        selected_indices = list(range(1, len(items) + 1))
+                        break
+                    else:
+                        selected_indices = self.parse_range(selection)
+                        if selected_indices and all(1 <= idx <= len(items) for idx in selected_indices):
+                            break
+                        print("Invalid input. Please try again.")
+                
+                if selection in ['b', 'q']:
+                    continue  # Restart the loop with new/previous state
+                
+                # Process selected items
+                temp_structure = ""
+                temp_selected = set()
+                temp_tokens = {}
+                subdirs_to_explore = []
+                
+                for i, (content, item_type) in enumerate(items, start=1):
+                    if i in selected_indices:
+                        if item_type == 'dir':
+                            temp_structure += f"{content.path}/\n"
+                            subdirs_to_explore.append((content.name, content.path))
+                        else:  # file
+                            temp_structure += f"{content.path}\n"
+                            temp_selected.add(content.path)
+                            
+                            # Count tokens if enabled
+                            if self.config.enable_token_counting and content.encoding != 'none':
+                                try:
+                                    file_content = content.decoded_content.decode('utf-8')
+                                    tokens = self.file_analyzer.count_tokens(file_content)
+                                    if tokens > 0:
+                                        temp_tokens[content.path] = tokens
+                                except Exception:
+                                    pass
+                    else:
+                        # Not selected
+                        if item_type == 'dir':
+                            temp_structure += f"{content.path}/ (not selected)\n"
+                        else:
+                            temp_structure += f"{content.path} (not selected)\n"
+                
+                # Update current state with selections
+                structure += temp_structure
+                selected_paths.update(temp_selected)
+                token_data.update(temp_tokens)
+                
+                # Now handle subdirectories
+                for subdir_name, subdir_path in subdirs_to_explore:
+                    while True:
+                        print(f"\nSelect items in '{subdir_name}'?")
+                        sub_choice = input("Options: (y)es, (n)o, (a)ll, (b)ack: ").lower()
+                        
+                        if sub_choice == 'b':
+                            # Don't process this subdirectory, but keep current selections
+                            break
+                        
+                        if sub_choice in ['y', 'n', 'a']:
+                            if sub_choice == 'y':
+                                # Save current state to stack before diving deeper
+                                navigation_stack.append({
+                                    'path': current_state['path'],
+                                    'structure': structure,
+                                    'selected_paths': selected_paths.copy(),
+                                    'token_data': token_data.copy()
+                                })
+                                
+                                # Explore subdirectory interactively
+                                sub_structure, sub_selected, sub_tokens = self.traverse_github_interactive(
+                                    repo, subdir_path, branch
+                                )
+                                structure += sub_structure
+                                selected_paths.update(sub_selected)
+                                token_data.update(sub_tokens)
+                                
+                                # Restore context after subdirectory exploration
+                                if navigation_stack:
+                                    navigation_stack.pop()
+                                    
+                            elif sub_choice == 'a':
+                                # Recursively get all files in subdirectory
+                                sub_structure, sub_selected, sub_tokens = self._get_all_github_files(
+                                    repo, subdir_path, branch
+                                )
+                                structure += sub_structure
+                                selected_paths.update(sub_selected)
+                                token_data.update(sub_tokens)
+                            break
+                        else:
+                            print("Invalid choice. Please enter 'y', 'n', 'a', or 'b'.")
+                
+                # If we're at root level, we're done
+                if not current_state['path']:
+                    return structure, selected_paths, token_data
+                else:
+                    # Return to parent context
+                    if navigation_stack:
+                        parent_state = navigation_stack.pop()
+                        return (parent_state['structure'] + structure,
+                               parent_state['selected_paths'] | selected_paths,
+                               {**parent_state['token_data'], **token_data})
+                    else:
+                        return structure, selected_paths, token_data
+            
+            except Exception as e:
+                self.errors.append(f"Error accessing {current_state['path']}: {str(e)}")
+                if navigation_stack:
+                    current_state = navigation_stack.pop()
+                else:
+                    return structure, selected_paths, token_data
+    
+    def _get_all_github_files(self, repo: GithubRepo, path: str, branch: Optional[str] = None) -> Tuple[str, Set[str], Dict[str, int]]:
+        """Recursively get all files from a GitHub directory"""
         structure = ""
         selected_paths = set()
         token_data = {}
         
         try:
             contents = repo.get_contents(path, ref=branch)
-            
-            # Sort and filter contents
-            items = []
-            for content in sorted(contents, key=lambda x: (x.type != 'dir', x.name)):
-                if content.type == 'dir' and content.name not in self.config.excluded_dirs:
-                    items.append((content, 'dir'))
-                elif content.type == 'file':
-                    items.append((content, 'file'))
-            
-            if not items:
-                return structure, selected_paths, token_data
-            
-            # Display items
-            print(f"\nContents of {path or 'root'}:")
-            for i, (content, item_type) in enumerate(items, start=1):
-                size_str = f" ({content.size:,} bytes)" if item_type == 'file' and content.size else ""
-                print(f"{i:3d}. {content.name} ({item_type}){size_str}")
-            
-            # Get user selection
-            while True:
-                selection = input("\nEnter selection (e.g., 1-5,7,9-12 or 'a' for all, 's' to skip): ").strip()
-                if selection.lower() == 's':
-                    return structure, selected_paths, token_data
-                elif selection.lower() == 'a':
-                    selected_indices = list(range(1, len(items) + 1))
-                    break
-                else:
-                    selected_indices = self.parse_range(selection)
-                    if selected_indices and all(1 <= idx <= len(items) for idx in selected_indices):
-                        break
-                    print("Invalid input. Please try again.")
-            
-            # Process selected items
-            for i, (content, item_type) in enumerate(items, start=1):
-                if i in selected_indices:
-                    if item_type == 'dir':
+            for content in contents:
+                if content.type == "dir":
+                    if content.name not in self.config.excluded_dirs:
                         structure += f"{content.path}/\n"
-                        
-                        # Ask about subdirectories
-                        while True:
-                            sub_choice = input(f"\nSelect items in '{content.name}'? (y/n/a for all): ").lower()
-                            if sub_choice in ['y', 'n', 'a']:
-                                break
-                            print("Please enter 'y', 'n', or 'a'")
-                        
-                        if sub_choice in ['y', 'a']:
-                            sub_structure, sub_selected, sub_tokens = self.traverse_github_interactive(
-                                repo, content.path, branch
-                            )
-                            structure += sub_structure
-                            selected_paths.update(sub_selected)
-                            token_data.update(sub_tokens)
-                    else:  # file
-                        structure += f"{content.path}\n"
-                        selected_paths.add(content.path)
-                        
-                        # Count tokens if enabled
-                        if self.config.enable_token_counting and content.encoding != 'none':
-                            try:
-                                file_content = content.decoded_content.decode('utf-8')
-                                tokens = self.file_analyzer.count_tokens(file_content)
-                                if tokens > 0:
-                                    token_data[content.path] = tokens
-                            except Exception:
-                                pass
+                        sub_structure, sub_selected, sub_tokens = self._get_all_github_files(
+                            repo, content.path, branch
+                        )
+                        structure += sub_structure
+                        selected_paths.update(sub_selected)
+                        token_data.update(sub_tokens)
                 else:
-                    # Not selected
-                    if item_type == 'dir':
-                        structure += f"{content.path}/ (not selected)\n"
-                    else:
-                        structure += f"{content.path} (not selected)\n"
-        
+                    structure += f"{content.path}\n"
+                    selected_paths.add(content.path)
+                    
+                    if self.config.enable_token_counting and content.encoding != 'none':
+                        try:
+                            decoded_content = content.decoded_content.decode('utf-8')
+                            token_count = self.file_analyzer.count_tokens(decoded_content)
+                            if token_count > 0:
+                                token_data[content.path] = token_count
+                        except Exception:
+                            pass
         except Exception as e:
-            self.errors.append(f"Error accessing {path}: {str(e)}")
+            self.errors.append(f"Error in {path}: {str(e)}")
         
         return structure, selected_paths, token_data
     
