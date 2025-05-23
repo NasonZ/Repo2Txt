@@ -7,10 +7,12 @@
 ### Core Functionality
 - **Dual Mode Support**: Analyze both GitHub repositories and local directories
 - **Interactive Selection**: Navigate through directories with granular file/folder selection
+- **Smart Navigation**: Back navigation (`b`) and quit options (`q`) during selection
 - **Token Analysis**: Comprehensive token counting and budget recommendations
 - **Intelligent Output**: Organized outputs in repository-named directories
 
 ### Enhanced Selection Experience
+- **Back Navigation**: Change your mind? Press `b` to go back to previous selections
 - **Flexible Options**: Choose specific files, entire directories, or skip sections
 - **Branch Selection**: For GitHub repos, select which branch to analyze
 - **Progress Tracking**: Visual progress bars during file processing
@@ -39,8 +41,8 @@
 
 ## 🔧 Installation
 
-    ```sh
-    git clone https://github.com/your-username/repo2txt.git
+```bash
+git clone https://github.com/your-username/repo2txt.git
 cd repo2txt
 pip install -r requirements.txt
 ```
@@ -86,6 +88,7 @@ export GITHUB_TOKEN='your_github_token'
 - **Number ranges**: `1-5,7,9-12` - Select specific items
 - **All**: `a` - Select all items in current directory
 - **Skip**: `s` - Skip current directory
+- **Back**: `b` - Go back to previous selection
 - **Quit**: `q` - Exit selection (with confirmation)
 
 ### Example Workflow
@@ -96,11 +99,11 @@ Contents of root:
   3. docs (dir)
   4. README.md (file)
 
-Options: Enter numbers (e.g., 1-5,7), 'a' for all, 's' to skip, 'q' to quit
+Options: Enter numbers (e.g., 1-5,7), 'a' for all, 's' to skip, 'b' to go back, 'q' to quit
 Your choice: 1,3-4
 
 Select items in 'src'?
-Options: (y)es, (n)o, (a)ll: y
+Options: (y)es, (n)o, (a)ll, (b)ack: y
 
 Contents of src:
   1. main.py (file, 1,234 bytes)
