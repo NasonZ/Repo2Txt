@@ -1,0 +1,409 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+---
+description: Guidelines for installing and managing packages in bot_template
+globs: 
+alwaysApply: false
+---
+# Installing Packages
+
+## Overview
+
+The bot_template uses modern, fast package managers:
+- **Frontend**: pnpm for Node.js packages
+- **Backend**: uv for Python packages
+
+## Frontend Package Management (pnpm)
+
+### Why pnpm?
+- Faster installations
+- Disk space efficient
+- Strict dependency resolution
+- Better monorepo support
+
+### Installing Dependencies
+
+#### Production Dependencies
+```bash
+# Add to dependencies
+cd frontend
+pnpm add package-name
+
+# Examples
+pnpm add swr
+pnpm add zustand
+pnpm add react-hook-form
+```
+
+#### Development Dependencies
+```bash
+# Add to devDependencies
+pnpm add -D package-name
+
+# Examples
+pnpm add -D @types/node
+pnpm add -D eslint-plugin-react
+pnpm add -D prettier
+```
+
+### Common Frontend Commands
+
+```bash
+# Install all dependencies
+pnpm install
+
+# Add package
+pnpm add package-name
+
+# Add dev dependency
+pnpm add -D package-name
+
+# Remove package
+pnpm remove package-name
+
+# Update dependencies
+pnpm update
+
+# Run scripts
+pnpm run dev
+pnpm run build
+pnpm run lint
+```
+
+### shadcn/ui Components
+```bash
+# Special installation for shadcn/ui
+pnpm dlx shadcn@latest add button
+pnpm dlx shadcn@latest add dialog
+pnpm dlx shadcn@latest add form
+```
+
+### Workspace Management
+```bash
+# If using workspaces
+pnpm add package-name --filter frontend
+pnpm add package-name --filter backend
+```
+
+## Backend Package Management (uv)
+
+### Project Setup
+```bash
+cd backend
+
+# Create virtual environment
+uv venv
+
+# Activate virtual environment
+source .venv/bin/activate  # Linux/Mac
+```
+
+### Installing Dependencies
+
+#### From requirements.txt
+```bash
+# Install all dependencies
+uv pip install -r requirements.txt
+
+# Install with specific Python version
+uv pip install --python 3.12 -r requirements.txt
+```
+
+#### Individual Packages
+```bash
+# Install single package
+uv pip install fastapi
+
+# Install with extras
+uv pip install "fastapi[standard]"
+
+# Install specific version
+uv pip install "sqlalchemy==2.0.35"
+```
+
+### Dependency Files
+```
+backend/
+├── requirements.txt         # Production dependencies
+├── requirements-dev.txt     # Development dependencies
+└── requirements-test.txt    # Testing dependencies
+```
+
+### Common Backend Commands
+
+```bash
+# Create virtual environment
+uv venv
+
+# Install dependencies
+uv pip install -r requirements.txt
+
+# Add new package and update requirements
+uv pip install package-name
+uv pip freeze > requirements.txt
+
+# Upgrade package
+uv pip install --upgrade package-name
+
+# Show installed packages
+uv pip list
+
+# Compile requirements (lock versions)
+uv pip compile requirements.in -o requirements.txt
+```
+
+## Dependency Management
+
+### Frontend (pnpm)
+
+#### pnpm-lock.yaml
+- Always commit `pnpm-lock.yaml`
+- Ensures reproducible builds
+- Use `pnpm install --frozen-lockfile` in CI
+
+#### Workspace Structure
+```yaml
+# pnpm-workspace.yaml
+packages:
+  - 'frontend'
+  - 'packages/*'
+```
+
+### Backend (uv)
+
+#### Lock Files
+```bash
+# Create lock file from requirements.in
+uv pip compile requirements.in -o requirements.txt
+
+# Install from lock file
+uv pip sync requirements.txt
+```
+
+#### Multiple Requirement Files
+```bash
+# Development environment
+uv pip install -r requirements.txt -r requirements-dev.txt
+
+# Testing environment
+uv pip install -r requirements.txt -r requirements-test.txt
+```
+
+## Best Practices
+
+### 1. Version Management
+
+#### Frontend (pnpm)
+```json
+{
+  "dependencies": {
+    "next": "15.0.3",      // Exact version
+    "react": "^19.0.0",    // Minor updates
+    "swr": "~2.2.0"        // Patch updates only
+  }
+}
+```
+
+#### Backend (uv)
+
+### 2. Security Updates
+
+#### Frontend
+```bash
+# Check for vulnerabilities
+pnpm audit
+
+# Update packages
+pnpm update --latest
+
+# Interactive update
+pnpm update --interactive
+```
+
+#### Backend
+```bash
+# Check outdated packages
+uv pip list --outdated
+
+# Audit for vulnerabilities
+pip-audit  # Separate tool
+
+# Update all packages
+uv pip install --upgrade -r requirements.txt
+```
+
+### 3. Clean Installation
+
+#### Frontend
+```bash
+# Clean install
+rm -rf node_modules pnpm-lock.yaml
+pnpm install
+```
+
+#### Backend
+```bash
+# Recreate environment
+rm -rf .venv
+uv venv
+uv pip install -r requirements.txt
+```
+
+## Common Tasks
+
+### Adding a New Feature
+
+#### Frontend Example: State Management
+```bash
+# Install Zustand
+pnpm add zustand
+
+# Install dev dependencies
+pnpm add -D @types/node
+```
+
+#### Backend Example: Redis Cache
+```bash
+# Install Redis client
+uv pip install redis
+
+# Update requirements
+uv pip freeze > requirements.txt
+```
+
+### Monorepo Setup
+
+#### Frontend
+```bash
+# Root package.json
+{
+  "scripts": {
+    "dev": "pnpm --filter frontend dev",
+    "build": "pnpm --filter frontend build"
+  }
+}
+```
+
+#### Backend
+```bash
+# Use separate virtual environment
+cd backend
+uv venv
+source .venv/bin/activate
+```
+
+## CI/CD Configuration
+
+### Frontend
+```yaml
+# .github/workflows/frontend.yml
+steps:
+  - uses: pnpm/action-setup@v2
+    with:
+      version: 8
+  - run: pnpm install --frozen-lockfile
+  - run: pnpm build
+```
+
+### Backend
+```yaml
+# .github/workflows/backend.yml
+steps:
+  - uses: actions/setup-python@v4
+    with:
+      python-version: '3.12'
+  - run: pip install uv
+  - run: uv venv
+  - run: uv pip install -r requirements.txt
+  - run: pytest
+```
+
+## Performance Tips
+
+### pnpm
+```bash
+# Use frozen lockfile in production
+pnpm install --frozen-lockfile
+
+# Prune unnecessary packages
+pnpm prune --production
+
+# Store management
+pnpm store prune
+```
+
+### uv
+```bash
+# Use compile for exact versions
+uv pip compile requirements.in -o requirements.txt
+
+# Use sync for exact installation
+uv pip sync requirements.txt
+
+# Parallel downloads
+uv pip install -r requirements.txt --parallel
+```
+
+## Troubleshooting
+
+### Common pnpm Issues
+1. **Peer dependency conflicts**
+   ```bash
+   pnpm install --strict-peer-dependencies=false
+   ```
+
+2. **Cache issues**
+   ```bash
+   pnpm store prune
+   pnpm install --force
+   ```
+
+3. **Workspace issues**
+   ```bash
+   pnpm install --filter frontend
+   ```
+
+### Common uv Issues
+1. **Version conflicts**
+   ```bash
+   uv pip install --force-reinstall package-name
+   ```
+
+2. **Platform-specific packages**
+   ```bash
+   uv pip install --platform linux package-name
+   ```
+
+3. **Cache issues**
+   ```bash
+   uv cache clean
+   ```
+
+## Migration Guide
+
+### From npm to pnpm
+```bash
+# Remove npm artifacts
+rm -rf node_modules package-lock.json
+
+# Install with pnpm
+pnpm install
+
+# Update scripts in package.json
+# npm run -> pnpm
+```
+
+### From pip to uv
+```bash
+# Install uv
+pip install uv
+
+# Create new environment
+uv venv
+
+# Install from existing requirements
+uv pip install -r requirements.txt
+```
