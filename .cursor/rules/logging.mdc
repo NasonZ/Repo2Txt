@@ -1,0 +1,408 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+---
+description: Backend logging guidelines for bot_template
+globs: 
+alwaysApply: false
+---
+# Backend Logging
+
+## Overview
+
+The bot_template backend uses Python's standard logging library with a centralized configuration system. Logging is essential for debugging, monitoring, and understanding application behavior in both development and production.
+
+## Configuration
+
+### Central Logging Setup
+
+The logging configuration is managed in `backend/logging_config.py`:
+
+```python
+from backend.logging_config import configure_logging, get_logger
+
+# In main.py
+configure_logging(
+    level="INFO",
+    log_file="app_logs.log",
+    module_levels={
+        "backend.llm.providers.openai": "DEBUG",
+        "httpx": "WARNING",
+        "backend.services.factories": "DEBUG",
+        "backend.auth": "WARNING",
+    }
+)
+```
+
+### Getting a Logger
+
+Always use the centralized logger factory:
+
+```python
+from backend.logging_config import get_logger
+
+# At module level
+logger = get_logger(__name__)
+
+# Usage
+logger.info("Starting chat service")
+logger.debug("Request payload: %s", payload)
+logger.error("Failed to process request", exc_info=True)
+```
+
+## Log Levels
+
+### When to Use Each Level
+
+1. **DEBUG**: Detailed information for diagnosing problems
+   ```python
+   logger.debug(f"Processing message: {message_id}")
+   logger.debug(f"Token count: {tokens}")
+   ```
+
+2. **INFO**: General informational messages
+   ```python
+   logger.info(f"Chat thread created: {thread_id}")
+   logger.info("User authentication successful")
+   ```
+
+3. **WARNING**: Warning about something unexpected
+   ```python
+   logger.warning(f"Rate limit approaching: {current}/{limit}")
+   logger.warning("Deprecated API endpoint used")
+   ```
+
+4. **ERROR**: Error that prevented a function from completing
+   ```python
+   logger.error(f"Failed to connect to database: {e}")
+   logger.error("Invalid API key", exc_info=True)
+   ```
+
+5. **CRITICAL**: Serious error that might cause the application to abort
+   ```python
+   logger.critical("Unable to start server: port already in use")
+   logger.critical("Database connection pool exhausted")
+   ```
+
+## Best Practices
+
+### 1. Module-Level Logger
+```python
+# Always create at module level
+logger = get_logger(__name__)
+
+class ChatService:
+    def __init__(self):
+        logger.debug("Initializing ChatService")
+```
+
+### 2. Use String Formatting
+```python
+# Good - lazy formatting
+logger.info("Created thread %s for user %s", thread_id, user_id)
+
+# Bad - eager formatting
+logger.info(f"Created thread {thread_id} for user {user_id}")
+```
+
+### 3. Include Context
+```python
+# Include relevant IDs and context
+logger.info(
+    "Message processed",
+    extra={
+        "thread_id": thread_id,
+        "user_id": user_id,
+        "model": model_name,
+        "tokens": token_count
+    }
+)
+```
+
+### 4. Log Exceptions Properly
+```python
+try:
+    result = await process_request(request)
+except Exception as e:
+    # Include stack trace
+    logger.error(
+        f"Failed to process request {request.id}",
+        exc_info=True
+    )
+    raise
+```
+
+### 5. Avoid Logging Sensitive Data
+```python
+# Bad - logs sensitive data
+logger.debug(f"User token: {token}")
+
+# Good - mask sensitive data
+logger.debug(f"User token: {token[:8]}...{token[-4:]}")
+
+# Better - don't log at all
+logger.debug("User authenticated successfully")
+```
+
+## Common Patterns
+
+### Service Initialization
+```python
+class DefaultChatService(ChatServiceInterface):
+    def __init__(self, db_session: AsyncSession):
+        self.db = db_session
+        logger.debug("Initialized DefaultChatService")
+```
+
+### API Route Logging
+```python
+@router.post("/chat")
+async def chat(request: ChatRequest):
+    logger.info(f"Chat request received: thread_id={request.thread_id}")
+    try:
+        response = await process_chat(request)
+        logger.info(f"Chat response sent: thread_id={request.thread_id}")
+        return response
+    except Exception as e:
+        logger.error(f"Chat failed: {e}", exc_info=True)
+        raise
+```
+
+### Async Operations
+```python
+async def fetch_thread(thread_id: str):
+    logger.debug(f"Fetching thread: {thread_id}")
+    try:
+        thread = await db.get_thread(thread_id)
+        logger.debug(f"Thread fetched: {thread_id}")
+        return thread
+    except Exception as e:
+        logger.error(f"Failed to fetch thread {thread_id}: {e}")
+        raise
+```
+
+### Stream Operations
+```python
+async def stream_response(request: StreamRequest):
+    logger.info(f"Starting stream: {request.id}")
+    try:
+        async for chunk in generate_stream(request):
+            logger.debug(f"Stream chunk: {len(chunk)} bytes")
+            yield chunk
+        logger.info(f"Stream completed: {request.id}")
+    except Exception as e:
+        logger.error(f"Stream failed: {request.id}", exc_info=True)
+        raise
+```
+
+## Module-Specific Configuration
+
+### Setting Module Levels
+```python
+# In main.py
+module_levels = {
+    # Debug level for specific modules
+    "backend.services.llm": "DEBUG",
+    "backend.db.operations": "DEBUG",
+    
+    # Warning level for noisy libraries
+    "httpx": "WARNING",
+    "sqlalchemy.engine": "WARNING",
+    
+    # Info level for general modules
+    "backend.api": "INFO",
+}
+```
+
+### Dynamic Level Changes
+```python
+# Change log level at runtime
+import logging
+logging.getLogger("backend.services").setLevel(logging.DEBUG)
+```
+
+## Structured Logging
+
+### Using Extra Fields
+```python
+logger.info(
+    "Request processed",
+    extra={
+        "request_id": request.id,
+        "method": request.method,
+        "path": request.url.path,
+        "status_code": response.status_code,
+        "duration_ms": duration
+    }
+)
+```
+
+### JSON Logging (Production)
+```python
+# For production, consider JSON formatter
+import json
+import logging
+
+class JSONFormatter(logging.Formatter):
+    def format(self, record):
+        log_obj = {
+            "timestamp": self.formatTime(record),
+            "level": record.levelname,
+            "module": record.name,
+            "message": record.getMessage(),
+            "extra": record.__dict__.get("extra", {})
+        }
+        return json.dumps(log_obj)
+```
+
+## Performance Considerations
+
+### 1. Avoid Expensive Operations in Debug
+```python
+if logger.isEnabledFor(logging.DEBUG):
+    logger.debug(f"Large object: {expensive_serialization(obj)}")
+```
+
+### 2. Use Lazy Formatting
+```python
+# Good - formatting only happens if DEBUG is enabled
+logger.debug("Processing %s items", len(items))
+
+# Bad - formatting always happens
+logger.debug(f"Processing {len(items)} items")
+```
+
+### 3. Batch Logging
+```python
+# For high-frequency events
+log_buffer = []
+for item in large_dataset:
+    log_buffer.append(process_item(item))
+    if len(log_buffer) >= 100:
+        logger.info(f"Processed batch: {len(log_buffer)} items")
+        log_buffer.clear()
+```
+
+## Testing with Logging
+
+### Capture Logs in Tests
+```python
+import logging
+import pytest
+
+@pytest.fixture
+def caplog(caplog):
+    caplog.set_level(logging.DEBUG)
+    return caplog
+
+def test_service_logs_error(caplog):
+    service = ChatService()
+    with pytest.raises(ValueError):
+        service.process_invalid_request()
+    
+    assert "Invalid request" in caplog.text
+    assert caplog.records[0].levelname == "ERROR"
+```
+
+## Production Logging
+
+### Log Aggregation
+```python
+# Configure for log aggregation services
+configure_logging(
+    level="INFO",
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    log_file="/var/log/bot_template/app.log"
+)
+```
+
+### Log Rotation
+```python
+# Use rotating file handler
+from logging.handlers import RotatingFileHandler
+
+handler = RotatingFileHandler(
+    "app.log",
+    maxBytes=10*1024*1024,  # 10MB
+    backupCount=5
+)
+```
+
+### Monitoring Integration
+```python
+# Send critical errors to monitoring
+logger.critical(
+    "Database connection lost",
+    extra={
+        "alert": True,
+        "service": "database",
+        "severity": "high"
+    }
+)
+```
+
+## Common Issues
+
+### 1. Missing Logs
+- Check log level configuration
+- Ensure logger is created correctly
+- Verify log handlers are attached
+
+### 2. Too Many Logs
+- Adjust module-specific levels
+- Use WARNING for noisy libraries
+- Consider log sampling for high-frequency events
+
+### 3. Performance Impact
+- Use appropriate log levels
+- Implement lazy formatting
+- Consider async logging for high-throughput
+
+## Examples
+
+### Complete Service Example
+```python
+from backend.logging_config import get_logger
+from backend.services.interfaces import ChatServiceInterface
+
+logger = get_logger(__name__)
+
+class ChatService(ChatServiceInterface):
+    def __init__(self, config: dict):
+        self.config = config
+        logger.info("ChatService initialized with config: %s", config.keys())
+    
+    async def process_message(self, message: Message) -> Response:
+        logger.debug(f"Processing message: {message.id}")
+        
+        try:
+            # Validate message
+            if not message.content:
+                logger.warning(f"Empty message received: {message.id}")
+                raise ValueError("Message content cannot be empty")
+            
+            # Process message
+            logger.info(f"Starting LLM processing for message: {message.id}")
+            result = await self._call_llm(message)
+            
+            logger.info(
+                "Message processed successfully",
+                extra={
+                    "message_id": message.id,
+                    "tokens_used": result.token_count,
+                    "model": result.model
+                }
+            )
+            
+            return result
+            
+        except Exception as e:
+            logger.error(
+                f"Failed to process message {message.id}",
+                exc_info=True,
+                extra={"message_id": message.id}
+            )
+            raise
+```
