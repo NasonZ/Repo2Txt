@@ -112,10 +112,14 @@ def create_adapter(repo_url_or_path: str, config: Config) -> RepositoryAdapter:
     if repo_url_or_path.startswith('https://github.com/') or repo_url_or_path.startswith('github.com/'):
         return GitHubAdapter(repo_url_or_path, config)
     
-    # Check if it looks like a local path (contains path separators or drive letters)
+    # Check if it looks like a local path (contains path separators, drive letters, or is a dot)
     is_path_like = ('/' in repo_url_or_path or 
                    '\\' in repo_url_or_path or 
                    os.sep in repo_url_or_path or
+                   repo_url_or_path == '.' or
+                   repo_url_or_path.startswith('./') or
+                   repo_url_or_path.startswith('.\\') or
+                   repo_url_or_path.startswith('..') or
                    (len(repo_url_or_path) > 2 and repo_url_or_path[1] == ':'))  # Windows drive letter
     
     if is_path_like:
