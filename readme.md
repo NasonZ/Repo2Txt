@@ -1,6 +1,6 @@
 # Repo2Txt
 
-**Transform any codebase into LLM-ready text with AI-powered intelligence**
+**Transform any codebase into LLM-ready context with AI-powered file selection**
 
 > From GitHub repos to local projects — skip the copy-paste cycle. Get perfectly formatted LLM inputs with intelligent file selection, token budget management, and multi-format output.
 
@@ -34,16 +34,16 @@
 
 ### Quick Start with uv (Recommended)
 ```bash
-git clone https://github.com/your-username/repo2txt.git
-cd repo2txt
+git clone https://github.com/NasonZ/RepoToTextForLLMs.git
+cd RepoToTextForLLMs
 uv sync
 source .venv/bin/activate
 ```
 
 ### Traditional Installation
 ```bash
-git clone https://github.com/your-username/repo2txt.git
-cd repo2txt
+git clone https://github.com/NasonZ/RepoToTextForLLMs.git
+cd RepoToTextForLLMs
 pip install -e .
 ```
 
@@ -56,6 +56,23 @@ pytest  # Run tests
 
 ## 🚀 Quick Start
 
+### Manual vs AI Selection Comparison
+
+**Manual Selection (Full Control)**
+```bash
+repo2txt /path/to/project
+# Interactive navigation through directories
+# You choose exactly which files to include
+```
+
+**AI Selection (Intelligent Assistance)**
+```bash
+repo2txt /path/to/project --ai-select --ai-query "Show me the authentication system"
+# AI analyzes project structure and selects relevant files
+# Includes routes, models, middleware, tests automatically
+# Can then iterate on selection via natural conversation
+```
+
 ### Basic Usage
 ```bash
 # Interactive manual selection
@@ -66,6 +83,37 @@ repo2txt https://github.com/owner/repo
 
 # Export multiple formats
 repo2txt <repo> --format xml --json
+```
+
+#### Interactive Selection Navigation
+During manual selection, use these commands:
+
+- **Number ranges**: `1-5,7,9-12` - Select specific items
+- **All**: `a` - Select all items in current directory
+- **Skip**: `s` - Skip current directory entirely
+- **Back**: `b` - Return to previous selection
+- **Quit**: `q` - Exit selection (with confirmation)
+
+#### Example Workflow
+```
+Contents of root:
+  1. src (dir)
+  2. tests (dir)
+  3. docs (dir)
+  4. README.md (file)
+
+Options: Enter numbers (e.g., 1-5,7), 'a' for all, 's' to skip, 'b' to go back, 'q' to quit
+Your choice: 1,3-4
+
+Select items in 'src'?
+Options: (y)es, (n)o, (a)ll, (b)ack: y
+
+Contents of src:
+  1. main.py
+  2. utils.py
+  3. config.py
+
+Your choice: a
 ```
 
 ### AI-Assisted Selection
@@ -83,7 +131,7 @@ repo2txt <repo> --ai-select --prompt-style meta-reasoning --token-budget 50000 -
 repo2txt <repo> --exclude-dirs "datasets,logs,cache" --ai-select
 ```
 
-## 🎬 See It in Action
+#### Example Workflow
 
 ```bash
 $ python -m repo2txt ./my-ecommerce-api --ai-select --prompt-style meta-reasoning --exclude-dirs "datasets,logs" --token-budget 25000
@@ -129,7 +177,7 @@ To confidently answer this, I selected files that together reveal:
 
 With these files, you'll see the complete payment flow from API request through to external provider integration, including all error handling patterns.
 
-— Want to dive deeper into specific providers or add webhook handling? Let me know!
+— Want to dive deeper into specific providers or add webhook handling (although this will push us over the 25k token budget)? Let me know!
 ```
 
 ## 🚀 Key Features
@@ -166,7 +214,7 @@ With these files, you'll see the complete payment flow from API request through 
 ### 🤝 Code Co-Pilot Mode
 **Closing the loop**: Move beyond static output generation to dynamic code interaction.
 
-- **Direct File Access**: AI reads selected files on-demand during conversation (no pre-generation needed)
+- **Direct File Access**: AI reads selected files on-demand during conversation
 - **Real-time Analysis**: Ask questions, get grounded answers based on live code examination
 - **Adaptive Workflow**: Advanced models use read tools directly; simpler models generate output then switch to analysis mode
 - **Continuous Interaction**: Analyse → Discuss → Refine → Repeat without export/import cycles
@@ -263,9 +311,43 @@ AI Options:
 ```
 output/
 └── RepoName_20240315_143022/
-    ├── RepoName_analysis.md      # Main content
-    ├── RepoName_tokens.txt       # Token report  
-    └── RepoName_tokens.json      # Token data (if --json)
+    ├── RepoName_analysis.md      # Main content with file contents
+    ├── RepoName_tokens.txt       # Token report with tree & table
+    └── RepoName_tokens.json      # Token data (if --json flag used)
+```
+
+### With JSON Export (3 files)
+```bash
+repo2txt <repo> --json
+```
+Adds: `RepoName_tokens.json` with programmatic token data
+
+### Token Report Structure
+
+#### 1. Directory Tree
+```
+📂 Directory Tree:
+├── src/ (Tokens: 15,234, Files: 12)
+│   ├── components/ (Tokens: 8,567, Files: 5)
+│   │   ├── Button.tsx (Tokens: 1,234)
+│   │   └── Card.tsx (Tokens: 2,345)
+│   └── utils/ (Tokens: 3,456, Files: 3)
+└── docs/ (Tokens: 5,678, Files: 8)
+```
+
+#### 2. Token Count Table
+```
+📊 Token Count Summary:
+File/Directory                    | Token Count | File Count
+────────────────────────────────────────────────────────────
+src                               |      15,234 |         12
+  components                      |       8,567 |          5
+    Button.tsx                    |       1,234 |
+    Card.tsx                      |       2,345 |
+  utils                           |       3,456 |          3
+docs                              |       5,678 |          8
+────────────────────────────────────────────────────────────
+Total                             |      20,912 |         20
 ```
 
 ### Example Workflows
