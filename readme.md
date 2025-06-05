@@ -207,7 +207,7 @@ With these files, you'll see the complete payment flow from API request through 
 ## 🛣️ Roadmap
 
 ### 🤝 Code Co-Pilot Mode
-**Closing the loop**: Move beyond static output generation to dynamic code interaction.
+**Closing the loop**: Move beyond static output generation to dynamic code interaction. This will be done by the addition of read and write tools which will enable:
 
 - **Direct File Access**: AI reads selected files on-demand during conversation
 - **Real-time Analysis**: Ask questions, get grounded answers based on live code examination
