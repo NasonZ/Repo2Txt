@@ -29,18 +29,10 @@ env/
 ENV/
 .venv/
 .env
+.env.local
+*.local
 
-# IDEs
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-.project
-.pydevproject
-.settings/
-.DS_Store
-
+# Python Tools
 # Testing
 .tox/
 .nox/
@@ -54,12 +46,11 @@ coverage.xml
 .hypothesis/
 .pytest_cache/
 
-# Documentation
-docs/_build/
-docs/.doctrees/
-
-# Jupyter Notebooks
-.ipynb_checkpoints
+# Type checking
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
 
 # pyenv
 .python-version
@@ -67,18 +58,23 @@ docs/.doctrees/
 # pipenv
 Pipfile.lock
 
-# mypy
-.mypy_cache/
-.dmypy.json
-dmypy.json
+# IDEs and Editors
+.vscode/
+.idea/
+.cursor/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+.settings/
 
-# Pyre
-.pyre/
+# Jupyter Notebooks
+.ipynb_checkpoints
 
-# Local configuration
-.env
-.env.local
-*.local
+# Documentation
+docs/_build/
+docs/.doctrees/
 
 # Logs
 *.log
@@ -103,6 +99,7 @@ Thumbs.db
 output/
 *_output/
 docs/
-
-# Cursor rules (if needed)
-# .cursor/rules/ideate.mdc
+.github/
+test/
+.archive/
+htmlcov/

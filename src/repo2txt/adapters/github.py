@@ -85,7 +85,7 @@ class GitHubAdapter(RepositoryAdapter):
             
             for content in sorted(contents, key=lambda x: (x.type != 'dir', x.name)):
                 # Apply same filtering as local adapter
-                if content.name.startswith('.') and content.name not in {'.github', '.gitlab'}:
+                if content.name.startswith('.') and content.name not in {'.gitlab'}:
                     continue  # Skip hidden files except certain dirs
                     
                 if content.type == 'dir' and content.name not in self.config.excluded_dirs:
@@ -119,15 +119,25 @@ class GitHubAdapter(RepositoryAdapter):
         
         while True:
             try:
-                contents = self.repo.get_contents(current_state['path'], ref=branch)
-                
-                # Sort and filter contents
+                # Use filtered list_contents instead of direct repo.get_contents
                 items = []
-                for content in sorted(contents, key=lambda x: (x.type != 'dir', x.name)):
-                    if content.type == 'dir' and content.name not in self.config.excluded_dirs:
-                        items.append((content, 'dir'))
-                    elif content.type == 'file':
-                        items.append((content, 'file'))
+                contents_list = self.list_contents(current_state['path'])
+                
+                for name, content_type, size in contents_list:
+                    if content_type == 'dir':
+                        # Get the actual GitHub content object for the directory
+                        try:
+                            content_obj = self.repo.get_contents(f"{current_state['path']}/{name}" if current_state['path'] else name, ref=branch)
+                            items.append((content_obj, 'dir'))
+                        except Exception:
+                            continue
+                    elif content_type == 'file':
+                        # Get the actual GitHub content object for the file
+                        try:
+                            content_obj = self.repo.get_contents(f"{current_state['path']}/{name}" if current_state['path'] else name, ref=branch)
+                            items.append((content_obj, 'file'))
+                        except Exception:
+                            continue
                 
                 if not items:
                     if navigation_stack:
@@ -315,6 +325,10 @@ class GitHubAdapter(RepositoryAdapter):
         try:
             contents = self.repo.get_contents(path, ref=branch)
             for content in contents:
+                # Apply same hidden file filtering as local adapter
+                if content.name.startswith('.') and content.name not in {'.gitlab'}:
+                    continue  # Skip hidden files except certain dirs
+                    
                 if content.type == "dir":
                     if content.name not in self.config.excluded_dirs:
                         structure += f"{content.path}/\n"
@@ -513,3 +527,51 @@ class GitHubAdapter(RepositoryAdapter):
         # Start from root
         _collect_files("")
         return sorted(file_list)
+    
+    def build_file_tree_and_list(self) -> Tuple[str, List[str]]:
+        """
+        Efficiently build both file tree and file list in a single traversal.
+        This avoids the duplicate repository scanning.
+        
+        Returns:
+            Tuple of (file_tree_string, file_paths_list)
+        """
+        tree_lines = []
+        file_paths = []
+        
+        def _traverse_recursive(current_path: str, prefix: str = "", is_last: bool = True, depth: int = 0):
+            """Recursively traverse and build both tree and file list."""
+            try:
+                items = self.list_contents(current_path)  # This already has filtering
+                if not items:
+                    return
+                
+                # Sort directories first, then files, alphabetically
+                dirs = [(name, type_, size) for name, type_, size in items if type_ == 'dir']
+                files = [(name, type_, size) for name, type_, size in items if type_ == 'file']
+                all_items = sorted(dirs) + sorted(files)
+                
+                for i, (name, type_, size) in enumerate(all_items):
+                    is_item_last = (i == len(all_items) - 1)
+                    connector = "└── " if is_item_last else "├── "
+                    tree_lines.append(f"{prefix}{connector}{name}")
+                    
+                    item_path = os.path.join(current_path, name) if current_path else name
+                    
+                    if type_ == 'dir':
+                        # Only recurse into directories that passed the filtering
+                        # (list_contents already filtered out excluded dirs)
+                        extension = "    " if is_item_last else "│   "
+                        _traverse_recursive(item_path, prefix + extension, is_item_last, depth + 1)
+                    else:  # file
+                        # Add file to list
+                        file_paths.append(item_path)
+                        
+            except Exception as e:
+                self.errors.append(f"Error traversing {current_path}: {str(e)}")
+        
+        # Start from root
+        _traverse_recursive("")
+        
+        tree_string = "\n".join(tree_lines)
+        return tree_string, file_paths

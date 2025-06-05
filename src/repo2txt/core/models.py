@@ -27,7 +27,7 @@ class Config:
         'venv', 'env', '.env', 'virtualenv', '.virtualenv',
         'bower_components', 'vendor', 'coverage', '.coverage',
         '.sass-cache', '.cache', 'dist', 'build', '.next',
-        '.nuxt', '.output', '.parcel-cache', 'out'
+        '.nuxt', '.output', '.parcel-cache', 'out', 'datasets'
     })
     
     # Common binary/non-text extensions

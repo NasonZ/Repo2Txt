@@ -368,97 +368,6 @@ Please analyze this repository to understand its structure, purpose, and functio
         
         return output_files
     
-    def _combined_tree_and_list(self, adapter, progress=None, task=None) -> Tuple[str, List[str]]:
-        """
-        Efficiently combine file tree building and file listing in a single traversal.
-        This eliminates the redundant repository scanning that was happening before.
-        
-        Args:
-            adapter: Repository adapter instance
-            progress: Optional Rich progress instance
-            task: Optional progress task ID
-            
-        Returns:
-            Tuple of (file_tree_string, file_paths_list)
-        """
-        from ..utils.file_filter import FileFilter
-        file_filter = FileFilter(self.config)
-        
-        tree_lines = []
-        file_paths = []
-        
-        def _traverse_recursive(current_path: str, prefix: str = "", is_last: bool = True, depth: int = 0) -> None:
-            """Recursively traverse and build both tree and file list with comprehensive filtering."""
-            try:
-                contents = adapter.list_contents(current_path)
-                if not contents:
-                    return
-                    
-                # Apply aggressive filtering to match local adapter behavior
-                filtered_contents = []
-                for name, content_type, size in contents:
-                    item_path = f"{current_path}/{name}" if current_path else name
-                    
-                    if content_type == 'dir':
-                        # Directory filtering
-                        if file_filter.should_exclude_directory(name):
-                            continue
-                        filtered_contents.append((name, content_type, size, item_path))
-                    else:  # file
-                        # Comprehensive file filtering
-                        
-                        # 1. Skip patterns (package-lock.json, *.min.js, etc.)
-                        if file_filter.should_skip_file(item_path):
-                            continue
-                            
-                        # 2. Binary file check by extension
-                        if file_filter.is_binary_by_extension(item_path):
-                            continue
-                            
-                        # 3. File size check
-                        if size > self.config.max_file_size:
-                            continue
-                            
-                        # 4. Hidden file check (already done in adapter but double-check)
-                        if name.startswith('.') and name not in {'.github', '.gitlab', '.gitignore', '.env.example'}:
-                            continue
-                            
-                        filtered_contents.append((name, content_type, size, item_path))
-                
-                # Update progress
-                if progress and task:
-                    current_total = len(file_paths)
-                    progress.update(task, completed=current_total, description=f"Scanning... {current_total} files found")
-                
-                # Process filtered contents
-                for i, (name, content_type, size, item_path) in enumerate(filtered_contents):
-                    is_last_item = (i == len(filtered_contents) - 1)
-                    
-                    # Tree formatting
-                    connector = "└── " if is_last_item else "├── "
-                    tree_lines.append(f"{prefix}{connector}{name}")
-                    
-                    if content_type == 'dir':
-                        # Recurse into directory
-                        next_prefix = prefix + ("    " if is_last_item else "│   ")
-                        _traverse_recursive(item_path, next_prefix, is_last_item, depth + 1)
-                    else:
-                        # Add file to list
-                        file_paths.append(item_path)
-                        
-            except Exception as e:
-                adapter.errors.append(f"Error traversing {current_path}: {str(e)}")
-        
-        # Start traversal
-        _traverse_recursive("")
-        
-        # Update final progress
-        if progress and task:
-            progress.update(task, completed=len(file_paths), description=f"Scan complete: {len(file_paths)} files found")
-        
-        tree_string = "\n".join(tree_lines)
-        return tree_string, file_paths
-    
     def _ai_file_selection(self, adapter, repo_name: str, readme_content: str) -> Tuple[str, Set[str], Dict[str, int]]:
         """
         Handle AI-assisted file selection using the file selection agent.
@@ -481,6 +390,7 @@ Please analyze this repository to understand its structure, purpose, and functio
             # Get LLM configuration from environment first
             llm_config = get_llm_config_from_env()
             
+            # Add progress tracking for file discovery
             if RICH_AVAILABLE:
                 with Progress(
                     TextColumn("[progress.description]{task.description}"),
@@ -490,12 +400,23 @@ Please analyze this repository to understand its structure, purpose, and functio
                     TimeElapsedColumn(),
                 ) as progress:
                     task = progress.add_task("Scanning repository", total=None)  # Indeterminate progress
-                    file_tree_str, file_paths = self._combined_tree_and_list(adapter, progress, task)
+                    
+                    # Use combined method if available, otherwise fall back to separate calls
+                    if hasattr(adapter, 'build_file_tree_and_list'):
+                        file_tree_str, file_paths = adapter.build_file_tree_and_list()
+                    else:
+                        file_tree_str = adapter.build_file_tree()
+                        progress.update(task, description="Collecting file list")
+                        file_paths = adapter.get_file_list()
+                    
+                    progress.update(task, completed=100, total=100, description=f"Scan complete: {len(file_paths)} files found")
             else:
                 print("|>| Scanning repository structure...")
-                file_tree_str, file_paths = self._combined_tree_and_list(adapter)
-            
-            print(f"|>| Found {len(file_paths)} files to analyze")
+                if hasattr(adapter, 'build_file_tree_and_list'):
+                    file_tree_str, file_paths = adapter.build_file_tree_and_list()
+                else:
+                    file_tree_str = adapter.build_file_tree()
+                    file_paths = adapter.get_file_list()
 
             # Convert file paths to the format expected by AI agent
             # The AI agent expects a list of dicts with 'path' and 'tokens' keys
