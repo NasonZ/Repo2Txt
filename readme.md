@@ -74,6 +74,8 @@ repo2txt <repo> --format xml --json
 ### Manual vs AI Selection
 
 #### Interactive Selection Navigation
+Precisely select repository contents with fine-grained control, allowing you to manually navigate directories and choose specific files or folders. This interactive mode ensures complete customisation of the selection process, giving you direct oversight and immediate visual feedback.
+
 During manual selection, use these commands:
 
 - **Number ranges**: `1-5,7,9-12` - Select specific items
@@ -83,7 +85,10 @@ During manual selection, use these commands:
 - **Quit**: `q` - Exit selection (with confirmation)
 
 ##### Example Workflow
+Navigate and choose relevant files interactively to build your desired context.
 ```
+python -m repo2txt ./my-ecommerce-api --exclude-dirs "datasets,logs" --token-budget 25000
+
 Contents of root:
   1. src (dir)
   2. tests (dir)
@@ -105,6 +110,8 @@ Your choice: a
 ```
 
 #### AI-Assisted Selection
+Leverage the intelligence of Large Language Models (LLMs) to identify optimal file selections for your specific needs. Through conversational interaction, Repo2Txt assistant dynamically adapts to your preferences, clarifies your requirements, and collaboratively explores ideas, refining its selections based on your feedback - akin to brainstorming and strategising with a knowledgeable colleague.
+
 ```bash
 # Let AI select files intelligently
 repo2txt <repo> --ai-select
@@ -123,9 +130,7 @@ repo2txt <repo> --exclude-dirs "datasets,logs,cache" --ai-select
 
 ```bash
 $ python -m repo2txt ./my-ecommerce-api --ai-select --prompt-style meta-reasoning --exclude-dirs "datasets,logs" --token-budget 25000
-```
 
-```
 [>]: How does the payment processing system work? Show me the main components and error handling.
 
 [<] 
