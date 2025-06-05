@@ -98,8 +98,7 @@ Thumbs.db
 *.txt
 output/
 *_output/
-docs/
-.github/
 test/
 .archive/
 htmlcov/
+.claude/
