@@ -223,15 +223,12 @@ LLM_BASE_URL=                # Custom endpoint (optional)
 
 # GitHub Access (optional)
 GITHUB_TOKEN=your_token      # For private repositories
-
-# UI Preferences (optional)
-DEFAULT_THEME=manhattan      # manhattan, matrix, green, sunset
 ```
 
 ### Development Environment
 
 The project supports multiple LLM providers:
-- **OpenAI**: GPT-4, GPT-3.5-turbo
+- **OpenAI**: GPT-4.1, GPT-3.5-turbo
 - **Ollama**: Local models (qwen3:32b, llama3.2, etc.)
 - **llama.cpp**: Local server endpoints
 
