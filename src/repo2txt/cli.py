@@ -67,10 +67,11 @@ def print_banner(console: ConsoleManager) -> None:
 @click.option('--debug', is_flag=True, help='Enable debug mode for AI selection (shows system prompts, tool calls)')
 @click.option('--prompt-style', type=click.Choice(['standard', 'meta-reasoning', 'xml']), default='standard',
               help='System prompt style for AI selection (standard, meta-reasoning, or xml)')
+@click.option('--exclude-dirs', help='Comma-separated list of additional directories to exclude (e.g., "datasets,logs,temp")')
 @click.version_option()
 def main(repo: str, output_dir: str, max_file_size: int, no_tokens: bool, 
          format: str, export_json: bool, theme: str, ai_select: bool,
-         ai_query: str, token_budget: int, debug: bool, prompt_style: str) -> None:
+         ai_query: str, token_budget: int, debug: bool, prompt_style: str, exclude_dirs: str) -> None:
     """
     Analyze a GitHub repository or local codebase.
     
@@ -89,7 +90,9 @@ def main(repo: str, output_dir: str, max_file_size: int, no_tokens: bool,
         
         repo2txt /path/to/project --format xml --json
 
-        repo2txt https://github.com/openai/openai-python --token-budget 20000 --ai-select 
+        repo2txt https://github.com/openai/openai-python --token-budget 20000 --ai-select
+        
+        repo2txt . --exclude-dirs "datasets,logs,temp,cache"
         
 
     """
@@ -118,6 +121,13 @@ def main(repo: str, output_dir: str, max_file_size: int, no_tokens: bool,
             debug=debug,
             prompt_style=prompt_style
         )
+        
+        # Add any additional excluded directories from command line
+        if exclude_dirs:
+            additional_dirs = set(dir.strip() for dir in exclude_dirs.split(',') if dir.strip())
+            config.excluded_dirs.update(additional_dirs)
+            if additional_dirs:
+                console.print(f"[dim]ADDITIONAL EXCLUDED DIRS: {', '.join(sorted(additional_dirs))}[/dim]")
         
         if max_file_size:
             config.max_file_size = max_file_size
