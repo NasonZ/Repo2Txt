@@ -432,16 +432,12 @@ result = analyzer.analyse("/path/to/repo")
 - Check LLM_BASE_URL for custom endpoints
 - Use `--debug` to see system prompts and API calls
 
-**Performance Issues**
-- Use `--exclude-dirs` to skip large directories
-- Set `--max-file-size` to limit individual files
-- Consider `--token-budget` for AI selection
-
 **GitHub Issues**
 - Set `GITHUB_TOKEN` for private repos and rate limiting
 - Use personal access token with appropriate scopes
 
 **Large Repository Performance**
+- Token counting can be disabled via the `--no-tokens` flag 
 - Use `--max-file-size` to limit individual files
 - Set appropriate `--token-budget` for AI selection
 - Consider analysing specific subdirectories
