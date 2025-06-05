@@ -1,54 +1,40 @@
-"""AI module for LLM integration and intelligent code analysis."""
+"""AI-powered file selection for repo2txt.
 
-from .adapter import (
-    AdapterFactory,
-    create_adapter,
-    create_vllm_adapter,
-    create_openai_adapter,
-    BaseLLMAdapter,
-    OpenAIAdapter,
-    VLLMAdapter,
-)
-from .models.common import (
-    LLMRequest,
-    LLMResponse,
-    StreamEvent,
-    StreamEventType,
-    Tool,
-    ToolCall,
-    Message,
-    MessageRole,
-    TokenUsage,
-)
-from .models.capabilities import ProviderCapabilities
-from .config import ModelType, get_model_config, get_default_config
+This package provides AI-assisted file selection capabilities using
+LLMs to help users intelligently select relevant files from repositories
+within token budgets.
+"""
+
+from .state import FileSelectionState, StateManager
+from .tools import Tool, ToolCall, ToolResult, ToolExecutor, create_file_selection_tools
+from .prompts import PromptGenerator
+from .llm import LLMClient, MessageManager, get_llm_config_from_env
+from .file_selector_agent import FileSelectorAgent
+from .console_chat import ChatConsole
 
 __all__ = [
-    # Factory and creation functions
-    "AdapterFactory",
-    "create_adapter",
-    "create_vllm_adapter",
-    "create_openai_adapter",
+    # State management
+    'FileSelectionState',
+    'StateManager',
     
-    # Adapter classes
-    "BaseLLMAdapter",
-    "OpenAIAdapter", 
-    "VLLMAdapter",
+    # Tool system
+    'Tool',
+    'ToolCall', 
+    'ToolResult',
+    'ToolExecutor',
+    'create_file_selection_tools',
     
-    # Data models
-    "LLMRequest",
-    "LLMResponse",
-    "StreamEvent",
-    "StreamEventType",
-    "Tool",
-    "ToolCall",
-    "Message",
-    "MessageRole",
-    "TokenUsage",
-    "ProviderCapabilities",
+    # Prompts
+    'PromptGenerator',
     
-    # Configuration
-    "ModelType",
-    "get_model_config",
-    "get_default_config",
+    # LLM interaction
+    'LLMClient',
+    'MessageManager',
+    'get_llm_config_from_env',
+    
+    # Main agent
+    'FileSelectorAgent',
+    
+    # Console
+    'ChatConsole',
 ]

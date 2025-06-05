@@ -87,6 +87,26 @@ class RepositoryAdapter(ABC):
         """
         pass
     
+    @abstractmethod
+    def build_file_tree(self) -> str:
+        """
+        Build a text representation of the repository file tree.
+        
+        Returns:
+            String representation of the file tree structure.
+        """
+        pass
+    
+    @abstractmethod 
+    def get_file_list(self) -> List[str]:
+        """
+        Get a list of all files in the repository.
+        
+        Returns:
+            List of file paths relative to repository root.
+        """
+        pass
+    
     def parse_range(self, range_str: str) -> List[int]:
         """Parse a range string like '1-3,5,7-9' into a list of integers."""
         if not range_str.strip():

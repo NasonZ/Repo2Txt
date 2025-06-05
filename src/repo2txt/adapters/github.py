@@ -34,7 +34,7 @@ class GitHubAdapter(RepositoryAdapter):
         self.repo = self.github.get_repo(f"{self.owner}/{self.repo_name}")
         self.branch = None
         
-        print(f"[>] Connected to GitHub repository: {self.owner}/{self.repo_name}")
+        print(f"|>| Connected to GitHub repository: {self.owner}/{self.repo_name}")
     
     def get_name(self) -> str:
         """Get repository name."""
@@ -44,7 +44,7 @@ class GitHubAdapter(RepositoryAdapter):
         """Allow user to select a branch."""
         try:
             branches = [b.name for b in self.repo.get_branches()]
-            print(f"\n[>] Available branches: {', '.join(branches[:10])}")
+            print(f"\n|>| Available branches: {', '.join(branches[:10])}")
             if len(branches) > 10:
                 print(f"    ... and {len(branches) - 10} more")
             
@@ -84,6 +84,10 @@ class GitHubAdapter(RepositoryAdapter):
             items = []
             
             for content in sorted(contents, key=lambda x: (x.type != 'dir', x.name)):
+                # Apply same filtering as local adapter
+                if content.name.startswith('.') and content.name not in {'.github', '.gitlab'}:
+                    continue  # Skip hidden files except certain dirs
+                    
                 if content.type == 'dir' and content.name not in self.config.excluded_dirs:
                     items.append((content.name, 'dir', 0))
                 elif content.type == 'file':
@@ -127,14 +131,14 @@ class GitHubAdapter(RepositoryAdapter):
                 
                 if not items:
                     if navigation_stack:
-                        print("[<] Empty directory, going back...")
+                        print("|<| Empty directory, going back...")
                         current_state = navigation_stack.pop()
                         continue
                     else:
                         return structure, selected_paths, token_data
                 
                 # Display items with better spacing
-                print(f"\n[>] Contents of {current_state['path'] or 'root'}:\n")
+                print(f"\n|>| Contents of {current_state['path'] or 'root'}:\n")
                 for i, (content, item_type) in enumerate(items, start=1):
                     if item_type == 'file' and self.config.enable_token_counting:
                         # Show token estimate for files
@@ -167,7 +171,7 @@ class GitHubAdapter(RepositoryAdapter):
                     print(f"\n[info]Selected: {len(selected_paths)} files | {total_tokens:,} tokens[/info]")
                 
                 # Show navigation options
-                print("\n[>] Options: Enter numbers (e.g., 1-5,7), 'a' for all, 's' to skip", end="")
+                print("\n|>| Options: Enter numbers (e.g., 1-5,7), 'a' for all, 's' to skip", end="")
                 if navigation_stack:
                     print(", 'b' to go back", end="")
                 print(", 'q' to quit")
@@ -427,7 +431,7 @@ class GitHubAdapter(RepositoryAdapter):
         file_contents = ""
         token_data = {}
         
-        print(f"\n[>] Processing {len(selected_files)} selected files...")
+        print(f"\n|>| Processing {len(selected_files)} selected files...")
         
         for file_path in tqdm(selected_files, desc="Reading files"):
             content, error = self.get_file_content(file_path)
@@ -443,3 +447,69 @@ class GitHubAdapter(RepositoryAdapter):
                 file_contents += self._format_file_content(file_path, None, error)
         
         return file_contents, token_data
+    
+    def build_file_tree(self) -> str:
+        """
+        Build a text representation of the repository file tree.
+        
+        Returns:
+            String representation of the file tree structure.
+        """
+        tree_lines = []
+        
+        def _build_tree_recursive(current_path: str, prefix: str = "", is_last: bool = True):
+            """Recursively build tree structure."""
+            try:
+                items = self.list_contents(current_path)
+                # Sort directories first, then files, alphabetically
+                dirs = [(name, type_, size) for name, type_, size in items if type_ == 'dir']
+                files = [(name, type_, size) for name, type_, size in items if type_ == 'file']
+                
+                all_items = sorted(dirs) + sorted(files)
+                
+                for i, (name, type_, size) in enumerate(all_items):
+                    is_item_last = (i == len(all_items) - 1)
+                    connector = "└── " if is_item_last else "├── "
+                    tree_lines.append(f"{prefix}{connector}{name}")
+                    
+                    if type_ == 'dir':
+                        # Add to tree recursively
+                        extension = "    " if is_item_last else "│   "
+                        new_path = os.path.join(current_path, name) if current_path else name
+                        _build_tree_recursive(new_path, prefix + extension, is_item_last)
+                        
+            except Exception as e:
+                self.errors.append(f"Error building tree for {current_path}: {str(e)}")
+        
+        # Start from root
+        _build_tree_recursive("")
+        return "\n".join(tree_lines)
+    
+    def get_file_list(self) -> List[str]:
+        """
+        Get a list of all files in the repository.
+        
+        Returns:
+            List of file paths relative to repository root.
+        """
+        file_list = []
+        
+        def _collect_files(current_path: str):
+            """Recursively collect all files."""
+            try:
+                items = self.list_contents(current_path)
+                
+                for name, type_, size in items:
+                    item_path = os.path.join(current_path, name) if current_path else name
+                    
+                    if type_ == 'file':
+                        file_list.append(item_path)
+                    elif type_ == 'dir':
+                        _collect_files(item_path)
+                        
+            except Exception as e:
+                self.errors.append(f"Error collecting files from {current_path}: {str(e)}")
+        
+        # Start from root
+        _collect_files("")
+        return sorted(file_list)
