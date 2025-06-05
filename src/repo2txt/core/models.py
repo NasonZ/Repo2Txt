@@ -66,6 +66,14 @@ class Config:
     enable_token_counting: bool = True
     token_encoder: str = "cl100k_base"
     output_format: Literal['xml', 'markdown'] = 'markdown'  # Output format for file contents
+    
+    # AI Selection settings
+    ai_select: bool = False  # Enable AI-assisted file selection
+    ai_query: Optional[str] = None  # Query for AI file selection
+    token_budget: int = 100000  # Token budget for AI selection
+    export_json: bool = False  # Export results as JSON
+    debug: bool = False  # Enable debug mode for AI selection (shows tool panels, system prompts)
+    prompt_style: str = 'standard'  # Prompt style for AI selection
 
 
 @dataclass

@@ -71,6 +71,18 @@ class FileFilter:
         path = Path(file_path)
         return path.suffix.lower() in self.config.binary_extensions
     
+    def is_binary_by_extension(self, file_path: str) -> bool:
+        """
+        Alias for is_binary_extension for consistency with analyzer usage.
+        
+        Args:
+            file_path: Path to the file.
+            
+        Returns:
+            True if file has binary extension, False otherwise.
+        """
+        return self.is_binary_extension(file_path)
+    
     def guess_is_binary(self, file_path: str) -> bool:
         """
         Guess if a file is binary based on its MIME type.

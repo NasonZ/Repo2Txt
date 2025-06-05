@@ -2,18 +2,26 @@
 import os
 from datetime import datetime
 from collections import defaultdict
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple, Set
 
 from ..core.models import Config, AnalysisResult
 from ..adapters import create_adapter
+
+try:
+    from rich.progress import Progress, TextColumn, BarColumn, TimeElapsedColumn
+    RICH_AVAILABLE = True
+except ImportError:
+    from tqdm import tqdm
+    RICH_AVAILABLE = False
 
 
 class RepositoryAnalyzer:
     """Main analyzer for repository analysis and report generation."""
     
-    def __init__(self, config: Config):
-        """Initialize analyzer with configuration."""
+    def __init__(self, config: Config, theme: str = "manhattan"):
+        """Initialize analyzer with configuration and theme."""
         self.config = config
+        self.theme = theme
     
     def analyze(self, repo_url_or_path: str) -> AnalysisResult:
         """
@@ -37,12 +45,18 @@ class RepositoryAnalyzer:
             branch = adapter.select_branch()
         
         # Get README
-        print("\n[>] Fetching README...")
+        print("\n|>| Fetching README...")
         readme_content = adapter.get_readme_content()
         
-        # Interactive traversal
-        print("\n[>] Starting interactive file selection...")
-        structure, selected_paths, token_data = adapter.traverse_interactive()
+        # File selection decision point - choose between Traditional Interactive and AI Agent Mode
+        if self.config.ai_select:
+            # AI Agent Mode - use AI-assisted file selection
+            print("\n|>| Starting AI-assisted file selection...")
+            structure, selected_paths, token_data = self._ai_file_selection(adapter, repo_name, readme_content)
+        else:
+            # Traditional Interactive Mode - manual file selection
+            print("\n|>| Starting interactive file selection...")
+            structure, selected_paths, token_data = adapter.traverse_interactive()
         
         # Get file contents
         if selected_paths:
@@ -353,3 +367,274 @@ Please analyze this repository to understand its structure, purpose, and functio
             output_files['json'] = json_path
         
         return output_files
+    
+    def _combined_tree_and_list(self, adapter, progress=None, task=None) -> Tuple[str, List[str]]:
+        """
+        Efficiently combine file tree building and file listing in a single traversal.
+        This eliminates the redundant repository scanning that was happening before.
+        
+        Args:
+            adapter: Repository adapter instance
+            progress: Optional Rich progress instance
+            task: Optional progress task ID
+            
+        Returns:
+            Tuple of (file_tree_string, file_paths_list)
+        """
+        from ..utils.file_filter import FileFilter
+        file_filter = FileFilter(self.config)
+        
+        tree_lines = []
+        file_paths = []
+        
+        def _traverse_recursive(current_path: str, prefix: str = "", is_last: bool = True, depth: int = 0) -> None:
+            """Recursively traverse and build both tree and file list with comprehensive filtering."""
+            try:
+                contents = adapter.list_contents(current_path)
+                if not contents:
+                    return
+                    
+                # Apply aggressive filtering to match local adapter behavior
+                filtered_contents = []
+                for name, content_type, size in contents:
+                    item_path = f"{current_path}/{name}" if current_path else name
+                    
+                    if content_type == 'dir':
+                        # Directory filtering
+                        if file_filter.should_exclude_directory(name):
+                            continue
+                        filtered_contents.append((name, content_type, size, item_path))
+                    else:  # file
+                        # Comprehensive file filtering
+                        
+                        # 1. Skip patterns (package-lock.json, *.min.js, etc.)
+                        if file_filter.should_skip_file(item_path):
+                            continue
+                            
+                        # 2. Binary file check by extension
+                        if file_filter.is_binary_by_extension(item_path):
+                            continue
+                            
+                        # 3. File size check
+                        if size > self.config.max_file_size:
+                            continue
+                            
+                        # 4. Hidden file check (already done in adapter but double-check)
+                        if name.startswith('.') and name not in {'.github', '.gitlab', '.gitignore', '.env.example'}:
+                            continue
+                            
+                        filtered_contents.append((name, content_type, size, item_path))
+                
+                # Update progress
+                if progress and task:
+                    current_total = len(file_paths)
+                    progress.update(task, completed=current_total, description=f"Scanning... {current_total} files found")
+                
+                # Process filtered contents
+                for i, (name, content_type, size, item_path) in enumerate(filtered_contents):
+                    is_last_item = (i == len(filtered_contents) - 1)
+                    
+                    # Tree formatting
+                    connector = "└── " if is_last_item else "├── "
+                    tree_lines.append(f"{prefix}{connector}{name}")
+                    
+                    if content_type == 'dir':
+                        # Recurse into directory
+                        next_prefix = prefix + ("    " if is_last_item else "│   ")
+                        _traverse_recursive(item_path, next_prefix, is_last_item, depth + 1)
+                    else:
+                        # Add file to list
+                        file_paths.append(item_path)
+                        
+            except Exception as e:
+                adapter.errors.append(f"Error traversing {current_path}: {str(e)}")
+        
+        # Start traversal
+        _traverse_recursive("")
+        
+        # Update final progress
+        if progress and task:
+            progress.update(task, completed=len(file_paths), description=f"Scan complete: {len(file_paths)} files found")
+        
+        tree_string = "\n".join(tree_lines)
+        return tree_string, file_paths
+    
+    def _ai_file_selection(self, adapter, repo_name: str, readme_content: str) -> Tuple[str, Set[str], Dict[str, int]]:
+        """
+        Handle AI-assisted file selection using the file selection agent.
+        
+        Args:
+            adapter: Repository adapter instance
+            repo_name: Name of the repository
+            readme_content: README content
+            
+        Returns:
+            Tuple of (structure, selected_paths, token_data)
+        """
+        try:
+            # Import here to avoid circular import issues
+            from ..ai import FileSelectorAgent, get_llm_config_from_env
+            
+            # Build file tree and get file list using adapter methods
+            print(f"|>| Building file tree...")
+            
+            # Get LLM configuration from environment first
+            llm_config = get_llm_config_from_env()
+            
+            if RICH_AVAILABLE:
+                with Progress(
+                    TextColumn("[progress.description]{task.description}"),
+                    BarColumn(),
+                    TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+                    TextColumn("Exploring..."),
+                    TimeElapsedColumn(),
+                ) as progress:
+                    task = progress.add_task("Scanning repository", total=None)  # Indeterminate progress
+                    file_tree_str, file_paths = self._combined_tree_and_list(adapter, progress, task)
+            else:
+                print("|>| Scanning repository structure...")
+                file_tree_str, file_paths = self._combined_tree_and_list(adapter)
+            
+            print(f"|>| Found {len(file_paths)} files to analyze")
+
+            # Convert file paths to the format expected by AI agent
+            # The AI agent expects a list of dicts with 'path' and 'tokens' keys
+            file_list = []
+            total_tokens = 0
+            
+            if self.config.enable_token_counting:
+                from ..core.file_analyzer import FileAnalyzer
+                file_analyzer = FileAnalyzer(self.config)
+                
+                print(f"|>| Analyzing {len(file_paths)} files for token counts...")
+                
+                if RICH_AVAILABLE:
+                    # Use Rich progress bar
+                    with Progress(
+                        TextColumn("[progress.description]{task.description}"),
+                        BarColumn(),
+                        TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+                        TextColumn("{task.completed}/{task.total}"),
+                        TimeElapsedColumn(),
+                    ) as progress:
+                        task = progress.add_task("Counting tokens", total=len(file_paths))
+                        for file_path in file_paths:
+                            content, error = adapter.get_file_content(file_path)
+                            tokens = 0
+                            if content and not error:
+                                tokens = file_analyzer.count_tokens(content)
+                            file_list.append({'path': file_path, 'tokens': tokens})
+                            total_tokens += tokens
+                            progress.advance(task)
+                else:
+                    # Fallback to tqdm if Rich not available
+                    for file_path in tqdm(file_paths, desc="Counting tokens"):
+                        content, error = adapter.get_file_content(file_path)
+                        tokens = 0
+                        if content and not error:
+                            tokens = file_analyzer.count_tokens(content)
+                        file_list.append({'path': file_path, 'tokens': tokens})
+                        total_tokens += tokens
+            else:
+                # No token counting, just create the dict structure
+                file_list = [{'path': path, 'tokens': 0} for path in file_paths]
+            
+            # Create analysis result with our pre-analyzed data
+            from ..core.models import AnalysisResult, FileNode
+            analysis_result = AnalysisResult(
+                repo_name=repo_name,
+                branch=None,
+                readme_content=readme_content,
+                structure=file_tree_str,
+                file_contents="",  # Not needed for selection
+                token_data={},
+                total_tokens=total_tokens,
+                total_files=len(file_list),
+                errors=adapter.errors
+            )
+            
+            # Add file_tree and file_list as dynamic attributes (expected by AI agent)
+            # For now, we'll pass the string representation as file_tree
+            # The AI agent will need to handle this appropriately
+            analysis_result.file_tree = file_tree_str
+            analysis_result.file_list = file_list
+            
+            # Get the actual repository path from adapter
+            repo_path = adapter.repo_path if hasattr(adapter, 'repo_path') else ""
+            
+            # Initialize the AI agent with pre-analyzed data
+            agent = FileSelectorAgent(
+                repo_path=repo_path,
+                openai_api_key=llm_config['api_key'],
+                model=llm_config['model'],
+                base_url=llm_config.get('base_url'),
+                theme=self.theme,
+                token_budget=self.config.token_budget,
+                debug_mode=self.config.debug,
+                prompt_style=self.config.prompt_style,
+                analysis_result=analysis_result  # Pass pre-analyzed data
+            )
+            
+            # Run the AI selection process
+            if self.config.ai_query:
+                # Use provided query
+                selected_files = agent.run_with_query(self.config.ai_query)
+            else:
+                # Interactive AI selection
+                selected_files = agent.run()
+            
+            # Convert selected files to set of paths
+            selected_paths = set(selected_files)
+            
+            # Generate structure representation (use the file tree we built)
+            structure = file_tree_str
+            
+            # Generate token data for selected files
+            token_data = {}
+            if self.config.enable_token_counting:
+                # Re-use file_analyzer from above
+                print(f"|>| Recalculating tokens for {len(selected_files)} selected files...")
+                
+                if RICH_AVAILABLE:
+                    # Use Rich progress bar
+                    with Progress(
+                        TextColumn("[progress.description]{task.description}"),
+                        BarColumn(),
+                        TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+                        TextColumn("{task.completed}/{task.total}"),
+                        TimeElapsedColumn(),
+                    ) as progress:
+                        task = progress.add_task("Final token count", total=len(selected_files))
+                        for file_path in selected_files:
+                            content, error = adapter.get_file_content(file_path)
+                            if content and not error:
+                                tokens = file_analyzer.count_tokens(content)
+                                if tokens > 0:
+                                    token_data[file_path] = tokens
+                            progress.advance(task)
+                else:
+                    # Fallback to tqdm if Rich not available
+                    for file_path in tqdm(selected_files, desc="Final token count"):
+                        content, error = adapter.get_file_content(file_path)
+                        if content and not error:
+                            tokens = file_analyzer.count_tokens(content)
+                            if tokens > 0:
+                                token_data[file_path] = tokens
+            
+            return structure, selected_paths, token_data
+            
+        except ImportError as e:
+            print(f"[!] AI selection not available: {str(e)}")
+            print("|>| Falling back to interactive selection...")
+            return adapter.traverse_interactive()
+        except KeyboardInterrupt:
+            # Re-raise KeyboardInterrupt to stop the CLI flow
+            raise
+        except Exception as e:
+            import traceback
+            print(f"[!] AI selection failed: {str(e)}")
+            if hasattr(self.config, 'debug') and self.config.debug:
+                print(f"[!] Debug traceback:")
+                traceback.print_exc()
+            print("|>| Falling back to interactive selection...")
+            return adapter.traverse_interactive()

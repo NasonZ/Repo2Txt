@@ -103,3 +103,7 @@ Should become:
 - [x] Configure environment variables
 - [x] Implement database schema
 ```
+
+## Notepad section 
+
+This is used to capture insights, learnings, workarounds, design decisions, nuances, context/background or anything else thats worth noting down.

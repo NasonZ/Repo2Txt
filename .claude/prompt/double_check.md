@@ -1,0 +1,1 @@
+always check the scripts before making changes to ensure ur mental model of the codebase is accurate and that ur fully aware of the affects of ur actions
