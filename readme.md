@@ -56,27 +56,13 @@ pytest  # Run tests
 
 ## 🚀 Quick Start
 
-### Manual vs AI Selection Comparison
-
-**Manual Selection (Full Control)**
-```bash
-repo2txt /path/to/project
-# Interactive navigation through directories
-# You choose exactly which files to include
-```
-
-**AI Selection (Intelligent Assistance)**
-```bash
-repo2txt /path/to/project --ai-select --ai-query "Show me the authentication system"
-# AI analyzes project structure and selects relevant files
-# Includes routes, models, middleware, tests automatically
-# Can then iterate on selection via natural conversation
-```
-
 ### Basic Usage
 ```bash
 # Interactive manual selection
 repo2txt /path/to/repo
+
+# AI-assisted selection (intelligent recommendations)
+repo2txt /path/to/repo --ai-select --ai-query "Show me the authentication system"
 
 # GitHub repository
 repo2txt https://github.com/owner/repo
@@ -85,7 +71,9 @@ repo2txt https://github.com/owner/repo
 repo2txt <repo> --format xml --json
 ```
 
-### Interactive Selection Navigation
+### Manual vs AI Selection
+
+#### Interactive Selection Navigation
 During manual selection, use these commands:
 
 - **Number ranges**: `1-5,7,9-12` - Select specific items
@@ -94,7 +82,7 @@ During manual selection, use these commands:
 - **Back**: `b` - Return to previous selection
 - **Quit**: `q` - Exit selection (with confirmation)
 
-#### Example Workflow
+##### Example Workflow
 ```
 Contents of root:
   1. src (dir)
@@ -116,7 +104,7 @@ Contents of src:
 Your choice: a
 ```
 
-### AI-Assisted Selection
+#### AI-Assisted Selection
 ```bash
 # Let AI select files intelligently
 repo2txt <repo> --ai-select
@@ -131,7 +119,7 @@ repo2txt <repo> --ai-select --prompt-style meta-reasoning --token-budget 50000 -
 repo2txt <repo> --exclude-dirs "datasets,logs,cache" --ai-select
 ```
 
-#### Example Workflow
+##### Example Workflow
 
 ```bash
 $ python -m repo2txt ./my-ecommerce-api --ai-select --prompt-style meta-reasoning --exclude-dirs "datasets,logs" --token-budget 25000
