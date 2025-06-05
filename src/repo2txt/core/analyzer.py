@@ -51,7 +51,7 @@ class RepositoryAnalyzer:
         # File selection decision point - choose between Traditional Interactive and AI Agent Mode
         if self.config.ai_select:
             # AI Agent Mode - use AI-assisted file selection
-            print("\n|>| Starting AI-assisted file selection...")
+            print("\n|>| Starting AI-assisted file selection...\n")
             structure, selected_paths, token_data = self._ai_file_selection(adapter, repo_name, readme_content)
         else:
             # Traditional Interactive Mode - manual file selection
@@ -409,7 +409,7 @@ Please analyze this repository to understand its structure, purpose, and functio
                         progress.update(task, description="Collecting file list")
                         file_paths = adapter.get_file_list()
                     
-                    progress.update(task, completed=100, total=100, description=f"Scan complete: {len(file_paths)} files found")
+                    progress.update(task, completed=100, total=100, description=f"|>| Scan complete: {len(file_paths)} files found")
             else:
                 print("|>| Scanning repository structure...")
                 if hasattr(adapter, 'build_file_tree_and_list'):
@@ -438,7 +438,7 @@ Please analyze this repository to understand its structure, purpose, and functio
                         TextColumn("{task.completed}/{task.total}"),
                         TimeElapsedColumn(),
                     ) as progress:
-                        task = progress.add_task("Counting tokens", total=len(file_paths))
+                        task = progress.add_task("|>| Counting tokens", total=len(file_paths))
                         for file_path in file_paths:
                             content, error = adapter.get_file_content(file_path)
                             tokens = 0
