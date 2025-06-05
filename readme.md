@@ -85,7 +85,7 @@ repo2txt https://github.com/owner/repo
 repo2txt <repo> --format xml --json
 ```
 
-#### Interactive Selection Navigation
+### Interactive Selection Navigation
 During manual selection, use these commands:
 
 - **Number ranges**: `1-5,7,9-12` - Select specific items
@@ -179,6 +179,8 @@ With these files, you'll see the complete payment flow from API request through 
 
 — Want to dive deeper into specific providers or add webhook handling (although this will push us over the 25k token budget)? Let me know!
 ```
+
+--- 
 
 ## 🚀 Key Features
 
