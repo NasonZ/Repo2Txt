@@ -263,22 +263,6 @@ During AI-assisted selection:
 - `/debug` - Toggle debug mode
 - `/debug state` - Show current configuration
 
-### Environment Setup
-Create a `.env` file:
-```bash
-# LLM Configuration
-LLM_PROVIDER=openai          # openai, ollama, llamacpp
-LLM_MODEL=gpt-4-turbo        # Model name
-LLM_API_KEY=your_api_key     # API key
-LLM_BASE_URL=                # Custom endpoint (optional)
-
-# GitHub Access
-GITHUB_TOKEN=your_token      # For private repos
-
-# UI Preferences  
-DEFAULT_THEME=manhattan      # manhattan, matrix, green, sunset
-```
-
 ### Command Line Options
 ```bash
 repo2txt [REPO] [OPTIONS]
@@ -298,6 +282,22 @@ AI Options:
   --token-budget N       Token budget for AI selection (default: 100000)
   --prompt-style STYLE   Prompt style: standard, meta-reasoning, xml
   --debug               Enable debug mode (shows system prompts, tool calls)
+```
+
+### Environment Setup
+Create a `.env` file:
+```bash
+# LLM Configuration
+LLM_PROVIDER=openai          # openai, ollama, llamacpp
+LLM_MODEL=gpt-4-turbo        # Model name
+LLM_API_KEY=your_api_key     # API key
+LLM_BASE_URL=                # Custom endpoint (optional)
+
+# GitHub Access
+GITHUB_TOKEN=your_token      # For private repos
+
+# UI Preferences  
+DEFAULT_THEME=manhattan      # manhattan, matrix, green, sunset
 ```
 
 ## 📊 Output Structure
