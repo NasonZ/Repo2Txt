@@ -4,7 +4,7 @@
 
 > From GitHub repos to local projects — skip the copy-paste cycle. Get perfectly formatted LLM inputs with intelligent file selection, token budget management, and multi-format output.
 
-[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ## 🎯 Why Repo2Txt?
@@ -20,13 +20,13 @@
 - 🚀 **Core Automation**: Skip the copy-paste-format cycle entirely - go straight from repo to LLM-ready text
 - 🎯 **Manual Control**: Interactive directory navigation with full control over selection
 - 🧠 **AI Enhancement**: Optional intelligent selection - "Show me the authentication system" → AI finds routes, models, middleware, tests
-- 🎛️ **Token Aware**: Real-time token counting and budget management (both modes)
+- 🎛️ **Token Aware**: Real-time token counting and budget management
 - 📄 **Multiple Formats**: Markdown, XML, JSON output for any LLM workflow
 - ⚡ **Instant Output**: From repo to formatted text in seconds, not minutes
 
 ## 📋 Prerequisites
 
-- **Python 3.8+** *(3.11+ recommended)*
+- **Python 3.9+** *(3.11+ recommended)*
 - **LLM API Access**: OpenAI, Ollama, llama.cpp, or compatible endpoints
 - **GitHub Token**: For private repositories *(optional)*
 
@@ -34,16 +34,16 @@
 
 ### Quick Start with uv (Recommended)
 ```bash
-git clone https://github.com/NasonZ/RepoToTextForLLMs.git
-cd RepoToTextForLLMs
+git clone https://github.com/NasonZ/repo2txt.git
+cd repo2txt
 uv sync
-source .venv/bin/activate
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 ```
 
 ### Traditional Installation
 ```bash
-git clone https://github.com/NasonZ/RepoToTextForLLMs.git
-cd RepoToTextForLLMs
+git clone https://github.com/NasonZ/repo2txt.git
+cd repo2txt
 pip install -e .
 ```
 
@@ -290,7 +290,7 @@ Create a `.env` file:
 # LLM Configuration
 LLM_PROVIDER=openai          # openai, ollama, llamacpp
 LLM_MODEL=gpt-4-turbo        # Model name
-LLM_API_KEY=your_api_key     # API key
+LLM_API_KEY=your_api_key     # API key (or OPENAI_API_KEY)
 LLM_BASE_URL=                # Custom endpoint (optional)
 
 # GitHub Access
@@ -359,38 +359,17 @@ repo2txt <repo> --exclude-dirs "datasets,logs,cache" --ai-select
 
 ## 🏗️ Architecture
 
-### Core Components
-```
-repo2txt/
-├── adapters/           # Repository adapters (GitHub, local, etc.)
-├── ai/                # AI-powered file selection system
-│   ├── agent_session.py    # Session state management
-│   ├── chat_orchestrator.py # Chat flow coordination  
-│   ├── command_handler.py   # Command processing
-│   ├── file_selector_agent.py # Main AI agent
-│   ├── llm.py              # LLM client & streaming
-│   ├── prompts.py          # System prompt generation
-│   ├── qwen_utils.py       # Qwen model utilities
-│   ├── state.py            # File selection state & token cache
-│   └── tools.py            # AI function calling tools
-├── core/              # Analysis engine
-│   ├── analyzer.py         # Main analysis orchestrator
-│   ├── file_analyzer.py    # Individual file processing
-│   ├── models.py           # Core data structures
-│   └── tokenizer.py        # Token counting utilities
-└── utils/             # Shared utilities
-    ├── console.py          # Terminal UI management
-    ├── console_base.py     # Base console functionality
-    ├── encodings.py        # File encoding detection
-    ├── file_filter.py      # File filtering logic
-    └── logging_config.py   # Logging configuration
-```
+Repo2Txt uses a **dual-workflow architecture** optimised for both manual control and AI-assisted selection:
 
-### Design Principles
-- **Modular Architecture**: Clean, testable components
-- **Survival-Oriented**: Graceful degradation when components fail
-- **Performance First**: Token caching, efficient processing
-- **Developer Experience**: Rich debugging, comprehensive testing
+**Key Design Features:**
+- **Modular Architecture**: Clean separation between repository adapters, AI system, and processing pipeline
+- **Graceful Degradation**: Automatic fallback from AI to manual mode when issues occur  
+- **Defensive AI Patterns**: Sophisticated error handling with LLM feedback loops for learning from mistakes
+- **Real-time Token Management**: Live counting and budget tracking across all workflows
+
+**For Technical Details:**
+- **High-level overview** → [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
+- **Implementation details** → [`docs/SYSTEM_DESIGN.md`](docs/SYSTEM_DESIGN.md)
 
 ## 🔧 Advanced Usage
 
@@ -415,12 +394,12 @@ from repo2txt.core.models import Config
 # Traditional analysis
 config = Config(enable_token_counting=True)
 analyzer = RepositoryAnalyzer(config, theme="manhattan")
-result = analyzer.analyse("/path/to/repo")
+result = analyzer.analyze("/path/to/repo")
 
 # AI-assisted analysis
 config.ai_select = True
 config.ai_query = "Select all Python files related to data processing"
-result = analyzer.analyse("/path/to/repo")
+result = analyzer.analyze("/path/to/repo")
 ```
 
 ## 🐛 Troubleshooting

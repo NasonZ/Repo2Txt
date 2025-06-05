@@ -73,8 +73,7 @@ Pipfile.lock
 .ipynb_checkpoints
 
 # Documentation
-docs/_build/
-docs/.doctrees/
+dev_docs/*
 
 # Logs
 *.log
