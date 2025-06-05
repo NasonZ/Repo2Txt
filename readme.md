@@ -13,7 +13,7 @@
 
 - 🤔 **Decision Paralysis**: Which files are actually relevant? How many tokens will this selection use?
 - ⏰ **Manual Tedium**: Copy-pasting files one by one, then formatting for LLM consumption
-- 💸 **Token Waste**: Include too much → expensive. Include too little → incomplete analysis
+- 🚫 Context Limits: Include too much → hit context limits. Include too little → incomplete understanding
 - 🔄 **Iteration Hell**: Realise you need different files, start the process again
 
 **The Solution**: Automated file selection and formatting with optional AI intelligence:
