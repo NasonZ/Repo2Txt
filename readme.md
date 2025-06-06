@@ -71,6 +71,8 @@ repo2txt https://github.com/owner/repo
 repo2txt <repo> --format xml --json
 ```
 
+*See [Commands & Configuration](#-commands--configuration) for full CLI options and [Example Workflows](#-example-workflows) for common usage patterns.*
+
 ### Manual vs AI Selection
 
 #### Interactive Selection Navigation
@@ -112,19 +114,7 @@ Your choice: a
 #### AI-Assisted Selection
 Leverage the intelligence of Large Language Models (LLMs) to identify optimal file selections for your specific needs. Through conversational interaction, Repo2Txt assistant dynamically adapts to your preferences, clarifies your requirements, and collaboratively explores ideas, refining its selections based on your feedback - akin to brainstorming and strategising with a knowledgeable colleague.
 
-```bash
-# Let AI select files intelligently
-repo2txt <repo> --ai-select
-
-# Targeted selection with query
-repo2txt <repo> --ai-select --ai-query "Show me the main API endpoints and database models"
-
-# Advanced options
-repo2txt <repo> --ai-select --prompt-style meta-reasoning --token-budget 50000 --theme matrix
-
-# Skip large directories
-repo2txt <repo> --exclude-dirs "datasets,logs,cache" --ai-select
-```
+*See [Example Workflows](#-example-workflows) for common AI selection patterns and [Commands & Configuration](#-commands--configuration) for chat commands.*
 
 ##### Example Workflow
 
@@ -184,7 +174,6 @@ With these files, you'll see the complete payment flow from API request through 
 ### Multi-Source Support
 - **GitHub repositories**: Public/private repos with token authentication
 - **Local directories**: Any folder structure with encoding detection
-- **Archive support**: Handle compressed codebases
 
 ### Token Management
 - **Real-time counting**: See token usage as you select files
@@ -204,46 +193,43 @@ With these files, you'll see the complete payment flow from API request through 
 - **Command system**: Interactive controls during AI sessions
 - **Progress tracking**: Visual feedback for long operations
 
-## 🛣️ Roadmap
+## 📚 Example Workflows
 
-### 🤝 Code Co-Pilot Mode
-**Closing the loop**: Move beyond static output generation to dynamic code interaction. This will be done by the addition of read and write tools which will enable:
+### AI-Powered Selection
+```bash
+# Let AI select files intelligently
+repo2txt <repo> --ai-select
 
-- **Direct File Access**: AI reads selected files on-demand during conversation
-- **Real-time Analysis**: Ask questions, get grounded answers based on live code examination
-- **Adaptive Workflow**: Advanced models use read tools directly; simpler models generate output then switch to analysis mode
-- **Continuous Interaction**: Analyse → Discuss → Refine → Repeat without export/import cycles
+# Targeted selection with query
+repo2txt <repo> --ai-select --ai-query "Show me the main API endpoints and database models"
 
-### 📝 Custom Output Templates
-Take full control of your LLM-ready output with customisable templates:
+# Advanced options
+repo2txt <repo> --ai-select --prompt-style meta-reasoning --token-budget 50000 --theme matrix
 
-```markdown
-## Custom Template Example
+# Skip large directories
+repo2txt <repo> --exclude-dirs "datasets,logs,cache" --ai-select
 
-<custom_prompt>
-You are analyzing a ${PROJECT_TYPE} project. Focus on ${ANALYSIS_FOCUS}.
-{ANALYSIS_INSTRUCTIONS}
-</custom_prompt>
+# Quick API documentation
+repo2txt <repo> --ai-select --ai-query "Select all API route files and documentation"
 
-<readme>
-${README_CONTENT}
-</readme>
+# Architecture overview
+repo2txt <repo> --ai-select --ai-query "Show me the main architecture components"
 
-<project_files>
-${SELECTED_FILES}
-</project_files>
-
-<reminder>
-Key areas to examine: ${KEY_AREAS}
-Remember to follow the instructions given.
-</reminder>
+# Focus on testing
+repo2txt <repo> --ai-select --ai-query "Show me all test files and testing utilities"
 ```
 
-**Template Features:**
-- **Variable Substitution**: Dynamic content based on your project
-- **Section Control**: Choose which sections to include/exclude
-- **Format Flexibility**: Create templates for specific LLM workflows
-- **Reusable Configs**: Save and share templates across projects
+### Manual Selection
+```bash
+# Basic interactive selection
+repo2txt /path/to/repo --theme manhattan
+
+# With token budget and exclusions
+repo2txt . --exclude-dirs "datasets,logs" --token-budget 50000
+
+# Export all formats
+repo2txt <repo> --format xml --json
+```
 
 ## 🤖 Commands & Configuration
 
@@ -283,6 +269,9 @@ AI Options:
   --prompt-style STYLE   Prompt style: standard, meta-reasoning, xml
   --debug               Enable debug mode (shows system prompts, tool calls)
 ```
+
+
+## 🔧 Configuration
 
 ### Environment Setup
 Create a `.env` file:
@@ -345,17 +334,47 @@ docs                              |       5,678 |          8
 Total                             |      20,912 |         20
 ```
 
-### Example Workflows
-```bash
-# Quick API documentation
-repo2txt <repo> --ai-select --ai-query "Select all API route files and documentation"
 
-# Architecture overview
-repo2txt <repo> --ai-select --ai-query "Show me the main architecture components"
+## 🛣️ Roadmap
 
-# Focus on core code (skip datasets)
-repo2txt <repo> --exclude-dirs "datasets,logs,cache" --ai-select
+### 🤝 Code Co-Pilot Mode
+**Closing the loop**: Move beyond static output generation to dynamic code interaction. This will be done by the addition of read and write tools which will enable:
+
+- **Direct File Access**: AI reads selected files on-demand during conversation
+- **Real-time Analysis**: Ask questions, get grounded answers based on live code examination
+- **Adaptive Workflow**: Advanced models use read tools directly; simpler models generate output then switch to analysis mode
+- **Continuous Interaction**: Analyse → Discuss → Refine → Repeat without export/import cycles
+
+### 📝 Custom Output Templates
+Take full control of your LLM-ready output with customisable templates:
+
+```markdown
+## Custom Template Example
+
+<custom_prompt>
+You are analyzing a ${PROJECT_TYPE} project. Focus on ${ANALYSIS_FOCUS}.
+{ANALYSIS_INSTRUCTIONS}
+</custom_prompt>
+
+<readme>
+${README_CONTENT}
+</readme>
+
+<project_files>
+${SELECTED_FILES}
+</project_files>
+
+<reminder>
+Key areas to examine: ${KEY_AREAS}
+Remember to follow the instructions given.
+</reminder>
 ```
+
+**Template Features:**
+- **Variable Substitution**: Dynamic content based on your project
+- **Section Control**: Choose which sections to include/exclude
+- **Format Flexibility**: Create templates for specific LLM workflows
+- **Reusable Configs**: Save and share templates across projects
 
 ## 🏗️ Architecture
 

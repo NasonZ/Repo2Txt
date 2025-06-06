@@ -190,22 +190,17 @@ class ConsoleBase:
     """Base class for console management with theme support and Rich/plain fallback."""
     
     def __init__(self, theme: str = "manhattan", file: Optional[Any] = None, 
-                 force_plain: bool = False, sanitize_paths: bool = False,
-                 repo_root: Optional[Path] = None):
+                 force_plain: bool = False):
         """Initialize console base.
         
         Args:
             theme: Theme name from THEMES
             file: Output file (defaults to sys.stdout)
             force_plain: Force plain output even if Rich is available
-            sanitize_paths: Enable path sanitization for privacy
-            repo_root: Repository root for path sanitization
         """
         self.theme_name = theme
         self.theme_colors = THEMES.get(theme, THEMES['manhattan'])
         self.file = file or sys.stdout
-        self.sanitize_paths = sanitize_paths
-        self.repo_root = repo_root
         
         # Determine if we can/should use Rich
         should_use_rich = self._should_use_rich_terminal()
@@ -324,43 +319,21 @@ class ConsoleBase:
         }
         return Theme(theme_dict)
     
-    def _sanitize_content(self, content: str) -> str:
-        """Sanitize paths in content if enabled."""
-        if not self.sanitize_paths:
-            return content
-            
-        if self.repo_root:
-            content = content.replace(str(self.repo_root), "REPO_ROOT")
-        
-        home_path = str(Path.home())
-        content = content.replace(home_path, "USER_HOME")
-        
-        return content
-    
     def print(self, *args, **kwargs):
         """Print with optional Rich formatting."""
-        # Apply path sanitization if enabled
-        sanitized_args = []
-        for arg in args:
-            if isinstance(arg, str):
-                sanitized_args.append(self._sanitize_content(arg))
-            else:
-                sanitized_args.append(arg)
-        
         if self.use_rich:
-            self.console.print(*sanitized_args, **kwargs)
+            self.console.print(*args, **kwargs)
         else:
             # Filter out Rich-specific kwargs for plain print
             plain_kwargs = {k: v for k, v in kwargs.items() 
                            if k not in ['style', 'justify', 'overflow', 'crop', 
                                        'soft_wrap', 'markup', 'highlight']}
             plain_kwargs['file'] = self.file
-            print(*sanitized_args, **plain_kwargs)
+            print(*args, **plain_kwargs)
     
     def print_status(self, status: StatusType, message: str, prefix: str = ""):
         """Print a status line with icon."""
         icon, _, color = status.value
-        message = self._sanitize_content(message)
         
         if self.use_rich:
             status_text = Text()
@@ -387,8 +360,6 @@ class ConsoleBase:
     
     def print_info_with_heading(self, heading: str, value: str):
         """Print an info message with a colored heading and regular value."""
-        message = self._sanitize_content(f"{heading} {value}")
-        
         if self.use_rich:
             from rich.text import Text
             text = Text()
@@ -396,10 +367,6 @@ class ConsoleBase:
             text.append(heading, style=self.theme_colors.heading)
             text.append(f" {value}", style=self.theme_colors.info)
             self.console.print(text)
-        else:
-            # Fallback for plain text
-            icon, _, _ = StatusType.INFO.value
-            print(f"{icon} {heading} {value}", file=self.file)
     
     def print_warning(self, message: str):
         """Print a warning message."""

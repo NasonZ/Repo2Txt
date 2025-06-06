@@ -30,8 +30,7 @@ class ConsoleManager(ConsoleBase):
     """
     
     def __init__(self, use_rich: bool = True, theme: str = "manhattan", 
-                 file: Optional[Any] = None, force_plain: bool = False,
-                 sanitize_paths: bool = False, repo_root: Optional[Any] = None):
+                 file: Optional[Any] = None, force_plain: bool = False):
         """Initialize console manager.
         
         Args:
@@ -39,17 +38,13 @@ class ConsoleManager(ConsoleBase):
             theme: Theme name from THEMES
             file: Output file (defaults to sys.stdout)
             force_plain: Force plain output even if Rich is available
-            sanitize_paths: Enable path sanitization (default: False)
-            repo_root: Repository root for path sanitization
         """
         # Initialize base class
-        super().__init__(theme=theme, file=file, force_plain=force_plain,
-                        sanitize_paths=sanitize_paths, repo_root=repo_root)
+        super().__init__(theme=theme, file=file, force_plain=force_plain)
     
     # Methods from ConsoleBase are inherited:
     # - _should_use_rich_terminal()
     # - _create_rich_theme()
-    # - _sanitize_content()
     # - print()
     # - print_status()
     # - print_error(), print_success(), print_info(), print_warning()
@@ -80,7 +75,6 @@ class ConsoleManager(ConsoleBase):
         
         Extends base implementation to support details parameter.
         """
-        message = self._sanitize_content(message)
         icon, _, color = status.value
         
         if self.use_rich:
@@ -90,7 +84,7 @@ class ConsoleManager(ConsoleBase):
             status_text.append(f"{icon} ", style=color)
             status_text.append(message)
             if details:
-                status_text.append(f" - {self._sanitize_content(details)}", style="dim")
+                status_text.append(f" - {details}", style="dim")
             self.console.print(status_text)
         else:
             line = f"{prefix}{icon} {message}"

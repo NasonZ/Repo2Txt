@@ -1,612 +1,457 @@
 # Repo2Txt System Design
 
-**Comprehensive technical documentation for implementation details, design patterns, and component interactions**
+**A practical guide to how Repo2Txt works internally**
 
-> This document provides deep technical details for contributors, researchers, and anyone needing to understand the internal workings of Repo2Txt's architecture.
+> **Quick Start**: Jump to [How It All Works Together](#how-it-all-works-together) for a simple overview, or [Common Scenarios](#common-scenarios) for practical examples.
 > 
-> **Start here if you need to**: Extend functionality, add new components, understand design patterns, or dive into implementation specifics.
+> **For Developers**: See [Implementation Details](#implementation-details) for code-level specifics.
 > 
-> For high-level understanding, see [`ARCHITECTURE.md`](ARCHITECTURE.md) first.
+> **Architecture Overview**: Check [`ARCHITECTURE.md`](ARCHITECTURE.md) for the high-level picture.
 
 ## Table of Contents
-1. [Component Interactions & Data Flow](#component-interactions--data-flow)
-2. [Design Patterns](#design-patterns)
-3. [AI System Architecture](#ai-system-architecture)
-4. [State Management](#state-management)
-5. [Error Handling & Resilience](#error-handling--resilience)
-6. [Performance Considerations](#performance-considerations)
-7. [Implementation Details](#implementation-details)
+1. [How It All Works Together](#how-it-all-works-together)
+2. [Common Scenarios](#common-scenarios)
+3. [Key Components Explained](#key-components-explained)
+4. [AI System Deep Dive](#ai-system-deep-dive)
+5. [Design Patterns We Use](#design-patterns-we-use)
+6. [Error Handling Strategy](#error-handling-strategy)
+7. [Performance & Optimisation](#performance--optimisation)
+8. [Implementation Details](#implementation-details)
 
-## Component Interactions & Data Flow
+## How It All Works Together
 
-### Detailed Architecture Flow
+### The Big Picture (5-Minute Version)
+
+When you run Repo2Txt, here's what happens:
+
+```
+1. You give it a repo (GitHub URL or local path)
+2. It scans all the files and builds a file tree
+3. You choose files either:
+   - Manually (browse and select interactively)
+   - With AI help (chat about what you want)
+4. It grabs the content of your selected files
+5. It outputs everything in a nice format (Markdown/XML/JSON)
+```
+
+### The Flow in Detail
 
 ```mermaid
 graph TD
-    A[CLI Entry Point] --> B[RepositoryAnalyzer]
-    B --> C{Selection Mode?}
-    C -->|Manual| D[Interactive Selection]
-    C -->|AI-Assisted| E[FileSelectorAgent]
+    A[You Run: repo2txt] --> B[Scan Repository]
+    B --> C{How to Select Files?}
+    C -->|Manual| D[Interactive Browser]
+    C -->|AI| E[Chat with AI Assistant]
     
-    D --> F[Adapter Layer]
-    E --> G[AgentSession]
-    G --> H[ChatOrchestrator]
-    H --> I[LLM Client]
-    H --> J[ToolExecutor]
-    J --> F
+    D --> F[Get File Contents]
+    E --> G[AI Selects Files] 
+    G --> F
     
-    F --> K{Source Type?}
-    K -->|GitHub| L[GitHubAdapter]
-    K -->|Local| M[LocalAdapter]
-    
-    L --> N[File Processing]
-    M --> N
-    N --> O[Output Generation]
-    O --> P[Results]
+    F --> H[Count Tokens]
+    H --> I[Generate Output]
+    I --> J[Save to File]
 ```
 
-### 1. Entry Point & Orchestration
+### What Each Step Does
 
-The flow begins at `cli.py`, which creates a `RepositoryAnalyzer` - the main orchestrator that coordinates all components:
+1. **Repository Scanning**: Builds a complete file tree, calculates sizes, filters out unwanted files
+2. **File Selection**: Either you navigate manually or describe what you want to an AI
+3. **Content Retrieval**: Downloads/reads the actual file contents with proper encoding
+4. **Token Counting**: Calculates how many tokens your selection will use in an LLM
+5. **Output Generation**: Formats everything nicely for LLM consumption
 
-- **CLI** → **RepositoryAnalyzer** → **Adapter Selection** (GitHub/Local)
-- **Decision Point**: Manual vs AI-assisted file selection
-- **Final Processing**: File content retrieval → Token counting → Output generation
+## Common Scenarios
 
-### 2. Manual Selection Flow
+### Scenario 1: Manual Selection of a Local Project
 
-```
-RepositoryAnalyzer → Adapter.traverse_interactive() → ConsoleManager → User Input → Selected Files
-```
-
-**Process:**
-1. User navigates directory structure interactively
-2. Real-time token counting during selection
-3. Direct file selection with immediate feedback
-4. Validation and constraint checking
-
-### 3. AI-Assisted Selection Flow
-
-```
-RepositoryAnalyzer → FileSelectorAgent → AgentSession → ChatOrchestrator → User Conversation
-                                                    ↓
-                                              ToolExecutor → StateManager → File Selection Updates
+```bash
+repo2txt /path/to/my/project
 ```
 
-**Key AI Components Interaction:**
+**What happens:**
+1. Scans your project directory
+2. Shows you an interactive file browser
+3. You navigate with arrow keys, select files with Space
+4. Shows token count in real-time
+5. Press 'g' to generate output when ready
 
-- **`FileSelectorAgent`**: Main coordinator, initialises all AI components
-- **`AgentSession`**: Central state manager holding configuration, LLM client, and conversation history
-- **`ChatOrchestrator`**: Manages conversation flow, streaming responses, command processing
-- **`ToolExecutor`**: Executes AI function calls to select/deselect files
-- **`StateManager`**: Tracks selected files, token usage, and maintains consistency
+**Behind the scenes:**
+- `LocalAdapter` handles file system operations
+- `ConsoleManager` provides the interactive UI
+- Token counting happens instantly using cached calculations
 
-### 4. Adapter Layer Abstraction
+### Scenario 2: AI-Assisted GitHub Repository
 
-Both selection modes converge on the adapter layer:
-
-```
-Selection Result → Adapter.get_file_contents() → File Analysis → Token Counting → Output
-```
-
-**Adapter Responsibilities:**
-- **Source Abstraction**: Uniform interface for GitHub repos and local directories  
-- **File Retrieval**: Efficient content fetching with encoding detection
-- **Metadata Extraction**: Repository structure, README content, branch information
-
-### 5. State Management in AI Mode
-
-The AI system maintains complex state through several interconnected components:
-
-- **`AgentSession`**: Session-level state (model config, UI console, debug settings)
-- **`StateManager`**: File selection state with real-time token tracking
-- **`MessageManager`**: Conversation history with system prompt management
-- **`TokenCache`**: Performance optimisation for repeated token calculations
-
-### 6. Real-Time Updates & Feedback
-
-During AI selection, multiple components coordinate to provide immediate feedback:
-
-```
-User Input → LLM Response → Tool Calls → StateManager Updates → UI Feedback
-                                    ↓
-                               Token Calculations → Budget Warnings → Selection Validation
+```bash
+repo2txt https://github.com/user/repo --ai
 ```
 
-### 7. Output Generation Pipeline
+**What happens:**
+1. Downloads repo metadata via GitHub API
+2. Starts AI chat session
+3. You describe what you want: "I need the main Python files for a Flask API"
+4. AI analyses the repo and suggests relevant files
+5. You can refine the selection through conversation
 
-Regardless of selection method, final processing follows a consistent pipeline:
+**Behind the scenes:**
+- `GitHubAdapter` handles API calls
+- `FileSelectorAgent` coordinates the AI system
+- `ChatOrchestrator` manages the conversation
+- `StateManager` tracks which files are selected
 
-```
-Selected Files → FileAnalyzer → Content Processing → Token Analysis → Format Selection → File Output
-                                        ↓
-                               (Markdown/XML/JSON) → Structured Reports → File System
-```
+### Scenario 3: Working with Large Repositories
 
-## Design Patterns
-
-### 1. **Adapter Pattern** ✅ *Actually Implemented*
-```python
-# Abstract interface for repository sources
-class RepositoryAdapter(ABC):
-    @abstractmethod
-    def get_file_list(self) -> List[str]
-    
-    @abstractmethod
-    def get_file_content(self, path: str) -> Tuple[Optional[str], Optional[str]]
-    
-    @abstractmethod
-    def traverse_interactive(self) -> Tuple[str, Set[str], Dict[str, int]]
-
-# Concrete implementations
-class GitHubAdapter(RepositoryAdapter):
-    def get_file_content(self, file_path: str) -> Tuple[Optional[str], Optional[str]]:
-        # GitHub API implementation
-        
-class LocalAdapter(RepositoryAdapter):
-    def get_file_content(self, file_path: str) -> Tuple[Optional[str], Optional[str]]:
-        # Local filesystem implementation
+```bash
+repo2txt https://github.com/large/project --token-budget 100000 --ai
 ```
 
-**Why this pattern?** Allows seamless support for different repository sources (local, GitHub, can be extended to other information sources)
+**What happens:**
+1. AI is aware of your token budget (100k tokens)
+2. It prioritises the most important files
+3. Gives warnings when approaching the limit
+4. Suggests alternatives if you go over budget
 
-**Factory Creation:**
-```python
-def create_adapter(repo_url_or_path: str, config: Config) -> RepositoryAdapter:
-    if repo_url_or_path.startswith('https://github.com/'):
-        return GitHubAdapter(repo_url_or_path, config)
-    else:
-        return LocalAdapter(repo_url_or_path, config)
-```
+**Behind the scenes:**
+- Real-time token calculation prevents overages
+- Smart file prioritisation based on repository analysis
+- Defensive validation ensures selections are valid
 
-### 2. **Session State Pattern** ✅ *Actually Implemented*
-```python
-class AgentSession:
-    """Centralised session state with component coordination"""
-    def __init__(self, config: SessionConfig, analysis_result: AnalysisResult, api_key: str):
-        self.llm_client = LLMClient(api_key, config.model, config.base_url)
-        self.state_manager = StateManager(analysis_result, config.token_budget)
-        self.message_manager = MessageManager()
-        self.tool_executor = ToolExecutor(self.state_manager)
-```
+## Key Components Explained
 
-**Why this pattern?** Encapsulates all session-related state and provides controlled access to components, making testing and state management much easier.
+### The Adapter System: One Interface, Multiple Sources
 
-### 3. **Command Pattern** ✅ *Actually Implemented*
-```python
-class CommandHandler:
-    def handle_command(self, command: str) -> bool:
-        parts = command.split()
-        cmd = parts[0].lower()
-        args = parts[1:] if len(parts) > 1 else []
-        
-        command_map = {
-            '/generate': self._handle_generate,
-            '/save': self._handle_save,
-            '/clear': self._handle_clear,
-            '/undo': self._handle_undo,
-            # ... more commands
-        }
-        
-        if cmd in command_map:
-            return command_map[cmd](args)
-```
-
-**Why this pattern?** Makes adding new commands trivial and enables features like undo/redo through state snapshots.
-
-### 4. **Simple Conditional Patterns**
-
-**Output Format Selection** - Straightforward conditional logic:
-```python
-if self.config.output_format == 'xml':
-    content = f'<file path="{file_path}">\n{content}\n</file>\n'
-else:  # markdown
-    content = f"```{file_path}\n{content}\n```\n"
-```
-
-**LLM Provider Configuration** - OpenAI client with configurable base URL:
-```python
-# Configuration-based approach
-client = OpenAI(api_key=api_key, base_url=base_url or "https://api.openai.com/v1")
-```
-
-**Why simple conditionals over Strategy patterns?**
-- **YAGNI (You Aren't Gonna Need It)**: The current approach works fine for the limited scope
-- **Premature abstraction**: Adding strategy patterns would over-engineer simple conditionals
-- **Technical debt vs. real benefit**: The abstraction cost isn't justified by current requirements
-
-### 5. **Other Points Worth Noting**
-
-**Simple State Machine for AI Agent:**
-```python
-# AgentSession manages state transitions
-def save_snapshot(self) -> None:
-    self.state_snapshots.append((
-        self.message_manager.get_messages().copy(),
-        self.state_manager.state.selected_files.copy(),
-        self.state_manager.state.total_tokens_selected
-    ))
-
-def restore_snapshot(self) -> bool:
-    if not self.state_snapshots:
-        return False
-    messages, files, tokens = self.state_snapshots.pop()
-    # Restore state...
-```
-
-**Observer-like Token Tracking:**
-```python
-class StateManager:
-    def add_selected_files(self, file_paths: List[str]) -> Dict[str, Any]:
-        for file_path in file_paths:
-            if file_path not in self.state.selected_files:
-                tokens = self._calculate_tokens(file_path)
-                self.state.selected_files.append(file_path)
-                self.state.total_tokens_selected += tokens
-                # Real-time feedback to UI
-```
-
-**Configuration Object Pattern:**
-```python
-@dataclass
-class Config:
-    github_token: str = field(default_factory=lambda: os.getenv('GITHUB_TOKEN', ''))
-    excluded_dirs: Set[str] = field(default_factory=lambda: {...})
-    # Single source of truth for all configuration
-```
-
-## AI System Architecture
-
-### Session Management
-
-The AI system uses a session-based architecture centred around `AgentSession`:
+**Problem**: We need to handle GitHub repos and local directories differently
+**Solution**: One common interface that works the same way
 
 ```python
-class AgentSession:
-    """Centralised session state and component coordination"""
-    def __init__(self, config: SessionConfig, analysis_result: AnalysisResult, api_key: str):
-        self.llm_client = LLMClient(api_key, config.model, config.base_url)
-        self.state_manager = StateManager(analysis_result, config.token_budget)
-        self.message_manager = MessageManager()
-        self.tool_executor = ToolExecutor(self.state_manager)
-        # ... other components
+# This works the same whether it's GitHub or local
+adapter = create_adapter("https://github.com/user/repo")  # or "/local/path"
+files = adapter.get_file_list()
+content = adapter.get_file_content("src/main.py")
 ```
 
-### Conversation Flow
+**Why this matters**: Adding support for GitLab, Bitbucket, or other sources just means creating a new adapter.
 
-1. **Initialisation**: System prompt generation based on repository analysis
-2. **User Input**: Command processing and message handling
-3. **LLM Interaction**: Streaming responses with tool calling
-4. **Tool Execution**: File selection operations via function calls
-5. **State Updates**: Real-time token tracking and selection updates
-6. **User Feedback**: Rich terminal output with progress indicators
+### The AI System: Structured Conversation Management
 
-### Tool Calling Architecture
+**Problem**: File selection can be complex - you might want "all Python files except tests" or "the main API components"
+**Solution**: An AI agent that understands your repository and can have a conversation about file selection
+
+**Key components:**
+- **AgentSession**: Keeps track of the entire conversation and state
+- **ChatOrchestrator**: Manages the back-and-forth conversation
+- **StateManager**: Remembers which files are selected and tracks token usage
+- **ToolExecutor**: Lets the AI actually select/deselect files
+
+### State Management: Keeping Everything in Sync
+
+**The Challenge**: As you select files (manually or with AI), we need to:
+- Track which files are selected
+- Calculate token usage in real-time
+- Provide immediate feedback
+- Handle undo operations
+- Maintain consistency
+
+**The Solution**: Centralised state with clear ownership:
 
 ```python
-class ToolExecutor:
-    """Executes AI tool calls for file selection"""
-    def execute_select_files(self, file_paths: List[str]) -> Dict[str, Any]:
-        # Validate selections
-        # Update state
-        # Calculate token impact
-        # Return feedback
-```
-
-### Defensive Tool Validation System
-
-The AI system implements sophisticated validation that goes beyond basic exception handling:
-
-```python
-def replace_selection(self, paths: List[str], reasoning: str) -> Dict[str, Any]:
-    valid_paths, invalid_paths = [], []
-    
-    for path in paths:
-        if path.strip() in self.available_files:
-            valid_paths.append(path.strip())
-        else:
-            invalid_paths.append(path.strip())
-    
-    # Build detailed error feedback for LLM to learn from
-    if invalid_paths and not valid_paths:
-        feedback = (
-            f"ERROR: None of the {len(invalid_paths)} paths were found in the repository. "
-            f"Invalid paths: {', '.join(invalid_paths)}. "
-            f"Please check the repository structure in the system prompt and correct these paths. "
-            f"Common issues: 1) Missing 'src/' prefix, 2) Wrong directory nesting, 3) Typos in filenames. "
-            f"Try again with corrected paths that exist in the shown file tree."
-        )
-```
-
-## State Management
-
-### Hierarchical State Structure
-
-```
-AgentSession (Root)
-├── Configuration State
-│   ├── Model settings
-│   ├── Theme preferences  
-│   └── Debug flags
-├── Conversation State
-│   ├── Message history
-│   ├── System prompts
-│   └── Tool call logs
-├── Selection State
-│   ├── Selected files
-│   ├── Token calculations
-│   └── Budget tracking
-└── UI State
-    ├── Display preferences
-    ├── Streaming settings
-    └── Progress indicators
-```
-
-### State Persistence
-
-- **Snapshots**: Automatic state snapshots for undo functionality
-- **Session Recovery**: Ability to restore previous session state
-- **Configuration Persistence**: Settings saved across sessions
-
-### File Selection State Management
-
-```python
-@dataclass
+# All file selection state lives here
 class FileSelectionState:
-    """Holds the current file selection state."""
-    selected_files: List[str] = field(default_factory=list)
-    token_budget: int = 50000
-    total_tokens_selected: int = 0
-    previous_files: List[str] = field(default_factory=list)
-    previous_tokens: int = 0
+    selected_files: List[str]
+    token_budget: int
+    total_tokens_selected: int
     
     def get_budget_usage_percent(self) -> float:
-        return round((self.total_tokens_selected / self.token_budget) * 100, 3)
-    
-    def is_over_budget(self) -> bool:
-        return self.total_tokens_selected > self.token_budget
+        return (self.total_tokens_selected / self.token_budget) * 100
 ```
 
-## Error Handling & Resilience
+### Error Handling: Graceful Degradation
 
-### AI-to-Manual Fallback
+**Philosophy**: Things will go wrong, but the user should still be able to accomplish their goal.
+
+**Examples:**
+- GitHub API is down → Fall back to asking for a local clone
+- AI selection fails → Fall back to manual selection
+- Some files can't be read → Process the ones that can be read
+- Invalid file paths → Show clear error messages and continue
+
+## AI System Deep Dive
+
+### How AI Selection Really Works
+
+1. **Initial Analysis**: The AI gets a complete picture of your repository
+   - File tree structure
+   - README content
+   - Repository metadata
+   - Available files with token counts
+
+2. **Conversation Loop**: You chat with the AI about what you want
+   - "I need the core API files"
+   - "Show me the authentication components"
+   - "Add the database models but skip the tests"
+
+3. **Tool Execution**: The AI uses "tools" to actually select files
+   - It can add files, remove files, or replace the entire selection
+   - Each action is validated against the actual repository structure
+   - Token usage is calculated and reported immediately
+
+4. **Validation & Feedback**: Every AI action is checked
+   - Do the files actually exist?
+   - Will this exceed the token budget?
+   - Are there any issues the user should know about?
+
+### The AI's "Tools" - What It Can Do
+
 ```python
-# Real fallback mechanism in analyzer.py
-try:
-    # AI-assisted selection
-    structure, selected_paths, token_data = self._ai_file_selection(adapter, repo_name, readme_content)
-except Exception as e:
-    print(f"[!] AI selection failed: {str(e)}")
-    if self.config.debug:
-        traceback.print_exc()
-    print("|>| Falling back to interactive selection...")
-    structure, selected_paths, token_data = adapter.traverse_interactive()
+# The AI can call these functions during conversation
+def select_files(file_paths: List[str], reasoning: str):
+    """Add files to the selection"""
+    
+def deselect_files(file_paths: List[str], reasoning: str):
+    """Remove files from the selection"""
+    
+def replace_selection(file_paths: List[str], reasoning: str):
+    """Replace entire selection with new files"""
+    
+def adjust_selection(add_paths: List[str], remove_paths: List[str], reasoning: str):
+    """Add some files and remove others in one action"""
 ```
 
-### Defensive Tool Call Validation
+### Smart Error Recovery
+
+The AI system doesn't just fail when things go wrong - it adapts:
+
 ```python
-# StateManager validates every tool call and provides detailed feedback
-def replace_selection(self, paths: List[str], reasoning: str) -> Dict[str, Any]:
-    valid_paths, invalid_paths = [], []
-    
-    for path in paths:
-        if path.strip() in self.available_files:
-            valid_paths.append(path.strip())
-        else:
-            invalid_paths.append(path.strip())
-    
-    # Build detailed error feedback for LLM to learn from
-    if invalid_paths and not valid_paths:
-        feedback = (
-            f"ERROR: None of the {len(invalid_paths)} paths were found in the repository. "
-            f"Invalid paths: {', '.join(invalid_paths)}. "
-            f"Please check the repository structure in the system prompt and correct these paths. "
-            f"Common issues: 1) Missing 'src/' prefix, 2) Wrong directory nesting, 3) Typos in filenames. "
-            f"Try again with corrected paths that exist in the shown file tree."
-        )
-    # Returns structured error data for both user and LLM
+# If the AI tries to select a file that doesn't exist:
+ERROR: File 'src/nonexistent.py' not found.
+Available files starting with 'src/':
+- src/main.py
+- src/utils.py
+- src/models/user.py
+Common issues: 1) Missing directory prefix, 2) Typos in filename 3) Hallucination
 ```
 
-### Error Feedback Loop to LLM
+This feedback goes back to the AI, which can then correct its mistake and try again.
+
+## Design Patterns We Use
+
+### Pattern 1: Adapter Pattern (For Repository Sources)
+
+**What it does**: Lets us support different types of repositories (GitHub, local, etc.) with the same interface.
+
+**Real example**:
 ```python
-# Tool execution captures and feeds errors back through conversation history
-async def _execute_tool_calls_and_update_history(self, tool_calls: List[ToolCall]):
-    for tool_call in tool_calls:
-        result = await self.tool_executor.execute_tool(tool_call)
+# This code works regardless of source
+def process_repository(repo_source: str):
+    adapter = create_adapter(repo_source)  # Figures out which type to use
+    files = adapter.get_file_list()        # Same method for all types
+    content = adapter.get_file_content("README.md")  # Same interface
+```
+
+**Why we use it**: Makes adding new repository types easy and keeps the code clean.
+
+### Pattern 2: Session State Pattern (For AI Conversations)
+
+**What it does**: Keeps all conversation state in one place, making it easy to manage and test.
+
+**Real example**:
+```python
+# Everything related to one AI session is here
+class AgentSession:
+    def __init__(self):
+        self.conversation_history = []
+        self.selected_files = []
+        self.token_usage = 0
+        self.ai_client = LLMClient()
         
-        # Error content is structured for LLM learning
-        if result.error:
-            output_content = json.dumps({
-                "error": result.error, 
-                "details": str(result.output)
-            })
-        else:
-            output_content = json.dumps(result.output) if result.is_json_output else str(result.output)
+    def add_message(self, message):
+        self.conversation_history.append(message)
         
-        # Add to conversation history so LLM sees its mistakes
-        tool_results_for_history.append({
-            "role": "tool", 
-            "tool_call_id": result.tool_call_id, 
-            "name": tool_call.tool_name, 
-            "content": output_content  # Includes error details
-        })
-    
-    # LLM receives full error context in next response
-    self.message_manager.add_tool_results(tool_results_for_history)
+    def select_file(self, path):
+        self.selected_files.append(path)
+        self.token_usage += calculate_tokens(path)
 ```
 
-### Intelligent Error Recovery
+**Why we use it**: Makes state management predictable and enables features like undo.
+
+### Pattern 3: Command Pattern (For User Commands)
+
+**What it does**: Makes it easy to add new commands and handle them consistently.
+
+**Real example**:
 ```python
-# Tool errors provide actionable guidance, not just failure notices
-if invalid_paths:
-    feedback = (
-        f"WARNING: {len(invalid_paths)} paths were not found: {', '.join(invalid_paths)}. "
-        f"Please verify these paths against the repository structure and either: "
-        f"1) Correct them if they were typos/mistakes, or 2) Remove them if they don't exist. "
-        f"Use adjust_selection to add the corrected paths."
-    )
+# Adding a new command is just adding a method
+class CommandHandler:
+    def handle_command(self, command: str):
+        if command.startswith('/save'):
+            return self._handle_save()
+        elif command.startswith('/undo'):
+            return self._handle_undo()
+        # Easy to add more...
 ```
 
-**This creates a defensive feedback loop where:**
-1. **Tool calls are validated** against repository structure 
-2. **Errors include diagnostic info** (common mistakes, correction strategies)
-3. **LLM receives structured error data** in conversation history
-4. **User sees immediate feedback** about what went wrong
-5. **LLM + User can re-strategise** based on the specific error context
+### Simple Patterns: When NOT to Over-Engineer
 
-### File-Level Error Tolerance
+**Format Selection**: We just use simple conditionals
 ```python
-# Continues processing when individual files fail
-try:
-    content, error = adapter.get_file_content(file_path)
-    if error:
-        failed_files.append((file_path, error))
-        # Continues with other files
-except Exception as e:
-    self.errors.append(f"Error accessing {file_path}: {str(e)}")
-    # Processing continues
+if format == 'xml':
+    return f'<file>{content}</file>'
+else:
+    return f'```{filename}\n{content}\n```'
 ```
 
-### Basic Exception Boundaries
-```python
-# Chat orchestrator handles API errors
-try:
-    response_content, tool_calls = await self._get_ai_response()
-except APIError as e:
-    self.ui.print_error(f"OpenAI API Error: {e.code} - {e.message}")
-    # User can continue chatting
-except Exception as e:
-    self.ui.print_error(f"Unexpected error: {e}")
-    break  # Exits chat loop but doesn't crash application
+**Why not a Strategy pattern?** Because we only have 2-3 formats and they're simple. The added complexity isn't worth it.
+
+## Error Handling Strategy
+
+### The Three-Tier Approach
+
+1. **Graceful Degradation**: Try to keep working even when things fail
+2. **Clear Error Messages**: Tell users exactly what went wrong and how to fix it
+3. **Fallback Options**: Provide alternatives when the primary approach fails
+
+### Real Examples
+
+**GitHub API Failure**:
+```
+[!] GitHub API failed: Rate limit exceeded
+[→] Tip: Try again in 10 minutes, or clone the repo locally:
+    git clone https://github.com/user/repo
+    repo2txt ./repo
 ```
 
-### Error Collection & Reporting
-
-The system collects errors for user visibility rather than attempting automatic recovery:
-
-```python
-# Errors are collected and reported, not retried
-self.errors.append(f"Error accessing {path}: {str(e)}")
-
-# At the end, errors are displayed to user
-if result.has_errors():
-    console.print(f"WARNINGS DETECTED: {len(result.errors)}")
-    for error in result.errors[:5]:
-        console.print(f"  > {error}")
+**AI Selection Failure**:
+```
+[!] AI selection failed: Invalid API key
+[→] Falling back to interactive selection...
+[Interactive file browser starts]
 ```
 
-This is **pragmatic error handling** - collect issues, show them to the user, and continue processing what can be processed. No fancy resilience patterns, just practical robustness.
+**Invalid File Paths**:
+```
+WARNING: 3 files could not be read:
+  × src/deleted.py (File not found)
+  × large_file.bin (File too large: 50MB > 1MB limit)
+  × binary.exe (Binary file, skipping)
+[→] Continuing with 15 valid files...
+```
 
-## Performance Considerations
+### Error Recovery for AI
 
-### Token Counting Optimisation
-
-- **Caching**: Token calculations cached per file content hash
-- **Lazy Calculation**: Tokens calculated only when needed
-- **Batch Processing**: Multiple files processed together
+When the AI makes mistakes, it gets detailed feedback:
 
 ```python
-class StateManager:
-    def __init__(self, analysis_result: AnalysisResult, token_budget: int = 50000):
-        # Create lookup maps for fast validation
-        self.available_files: Set[str] = {f['path'] for f in analysis_result.file_list}
-        self.file_tokens: Dict[str, int] = {f['path']: f.get('tokens', 0) for f in analysis_result.file_list}
+# Instead of just "File not found"
+error_message = (
+    f"ERROR: File '{path}' not found in repository. "
+    f"Available files in '{dirname}': {similar_files}. "
+    f"Common issues: 1) Wrong directory, 2) Typo in filename. "
+    f"Please check the file tree and try again."
+)
 ```
 
-### Memory Management
+This helps the AI learn and make better suggestions.
 
-- **Streaming**: Large file contents streamed rather than loaded entirely
-- **Selective Loading**: Only selected files loaded into memory
-- **Garbage Collection**: Explicit cleanup of large objects
+## Performance & Optimisation
+
+### Smart Token Counting
+
+**The Problem**: Calculating tokens for every file on every selection is slow.
+**The Solution**: Cache token counts and only recalculate when needed.
+
+```python
+# Calculate once, use many times
+class TokenCache:
+    def get_tokens(self, file_path: str, content: str) -> int:
+        content_hash = hashlib.md5(content.encode()).hexdigest()
+        if content_hash in self.cache:
+            return self.cache[content_hash]
+        
+        tokens = self.tokenizer.count_tokens(content)
+        self.cache[content_hash] = tokens
+        return tokens
+```
+
+### Efficient File Loading
+
+**Only load what you need**: Selected files are loaded on-demand, not all at once.
+**Streaming**: Large outputs are streamed rather than built in memory.
+**Parallel processing**: Multiple files can be processed simultaneously.
 
 ### Network Optimisation
 
-- **GitHub API**: Efficient use of API calls with caching
-- **LLM Requests**: Streaming responses to reduce perceived latency
-- **Concurrent Processing**: Parallel file processing where possible
+**GitHub API**: Use efficient API calls and cache repository metadata.
+**AI Requests**: Stream responses so users see output immediately.
+**Concurrent operations**: Download multiple files in parallel when possible.
 
 ## Implementation Details
 
-### Module Structure
+### Project Structure
 
 ```
 src/repo2txt/
-├── adapters/           # Repository adapters (GitHub, local, etc.)
-│   ├── base.py         # Abstract interface defining adapter contract
-│   ├── github.py       # GitHub repository adapter with API integration
-│   ├── local.py        # Local filesystem adapter with encoding detection
-│   └── __init__.py     # Adapter factory and path resolution logic
-├── ai/                 # AI-powered file selection system
-│   ├── agent_session.py    # Session state management
-│   ├── chat_orchestrator.py # Chat flow coordination  
-│   ├── command_handler.py   # Command processing
-│   ├── file_selector_agent.py # Main AI agent
-│   ├── llm.py              # LLM client & streaming
-│   ├── prompts.py          # System prompt generation
-│   ├── qwen_utils.py       # Qwen model utilities
-│   ├── state.py            # File selection state & token cache
-│   └── tools.py            # AI function calling tools
-├── core/               # Analysis engine
-│   ├── analyzer.py         # Main analysis orchestrator
+├── adapters/           # Handle different repository sources
+│   ├── github.py       # GitHub API integration
+│   ├── local.py        # Local filesystem access
+│   └── base.py         # Common interface
+├── ai/                 # AI-powered file selection
+│   ├── agent_session.py    # Session management
+│   ├── chat_orchestrator.py # Conversation handling
+│   ├── tools.py            # AI function calling
+│   └── state.py            # Selection state tracking
+├── core/               # Main analysis engine
+│   ├── analyzer.py         # Orchestrates everything
 │   ├── file_analyzer.py    # Individual file processing
-│   ├── models.py           # Core data structures
-│   └── tokenizer.py        # Token counting utilities
+│   └── tokenizer.py        # Token counting
 └── utils/              # Shared utilities
-    ├── console.py          # Terminal UI management
-    ├── console_base.py     # Base console functionality
+    ├── console.py          # Terminal UI
     ├── encodings.py        # File encoding detection
-    ├── file_filter.py      # File filtering logic
-    └── logging_config.py   # Logging configuration
+    └── file_filter.py      # File filtering logic
 ```
 
-### Key Data Structures
+### Key Data Models
 
 ```python
 @dataclass
 class Config:
-    """Main configuration object"""
-    github_token: str = field(default_factory=lambda: os.getenv('GITHUB_TOKEN', ''))
-    excluded_dirs: Set[str] = field(default_factory=lambda: {...})
+    """Main configuration - everything in one place"""
+    github_token: str
+    excluded_dirs: Set[str] = {'node_modules', '.git', '__pycache__'}
     max_file_size: int = 1024 * 1024  # 1MB
     output_format: str = 'markdown'
-    
+    token_budget: int = 50000
+
 @dataclass
 class AnalysisResult:
     """Results of repository analysis"""
     repo_name: str
-    structure: str
+    structure: str          # File tree as text
     selected_files: List[str]
-    file_list: List[Dict[str, Any]]
+    file_list: List[Dict]   # Detailed file information
     token_data: Dict[str, int]
     errors: List[str] = field(default_factory=list)
 ```
 
-### Tool Registration System
+### Adding New Features
 
-```python
-class ToolExecutor:
-    def __init__(self, state_manager: StateManager):
-        self._registered_tools: Dict[str, Tuple[Tool, Callable]] = {}
-        self.state_manager = state_manager
-        self._register_default_tools()
-    
-    def _register_default_tools(self):
-        """Register the default set of tools for file selection."""
-        self.register_tool(
-            Tool(
-                name="replace_selection",
-                description="Replace the entire file selection with new paths",
-                parameters={...}
-            ),
-            self.state_manager.replace_selection
-        )
-```
+**New Repository Source** (e.g., GitLab):
+1. Create `GitLabAdapter` inheriting from `RepositoryAdapter`
+2. Implement the required methods (`get_file_list`, `get_file_content`, etc.)
+3. Add detection logic to `create_adapter()` function
 
-This system makes it trivial to add new AI capabilities by registering new tools with their corresponding functions.
+**New AI Tool**:
+1. Define the tool schema in `tools.py`
+2. Implement the tool function in `StateManager`
+3. Register it in `ToolExecutor`
+
+**New Output Format**:
+1. Add format option to `Config`
+2. Implement formatting logic in `FileAnalyzer`
+3. Update CLI argument parsing
 
 ---
 
 **Documentation Navigation:**
-- **← High-level overview** → [`ARCHITECTURE.md`](ARCHITECTURE.md)  
-- **← Usage guide** → [`../README.md`](../README.md)
-- **Contributing** → See main README for development setup and contribution guidelines 
+- **← Architecture Overview** → [`ARCHITECTURE.md`](ARCHITECTURE.md)  
+- **← Usage Guide** → [`../README.md`](../README.md)
+- **Contributing** → See main README for development setup
