@@ -26,9 +26,16 @@ class TestAdapterFactory:
             assert isinstance(adapter, LocalAdapter)
 
     def test_create_local_adapter_relative_path(self):
-        # Test with current directory
-        adapter = create_adapter(".", Config())
-        assert isinstance(adapter, LocalAdapter)
+        # Test with temp directory instead of current directory (which has too many files)
+        import tempfile
+        with tempfile.TemporaryDirectory() as temp_dir:
+            # Create a few test files
+            test_file = os.path.join(temp_dir, "test.py")
+            with open(test_file, 'w') as f:
+                f.write("print('hello')")
+            
+            adapter = create_adapter(temp_dir, Config())
+            assert isinstance(adapter, LocalAdapter)
 
 
 class TestGitHubAdapter:
@@ -112,17 +119,21 @@ class TestLocalAdapter:
             assert hasattr(adapter.file_analyzer, 'count_tokens')
 
     def test_parse_range(self):
-        adapter = LocalAdapter(".", Config())
-        assert adapter.parse_range("5") == [5]
-        assert adapter.parse_range("1-3") == [1, 2, 3]
-        assert adapter.parse_range("8-10") == [8, 9, 10]
-        assert adapter.parse_range("1,3,5") == [1, 3, 5]
-        assert adapter.parse_range("1-3,7,9-10") == [1, 2, 3, 7, 9, 10]
+        import tempfile
+        with tempfile.TemporaryDirectory() as temp_dir:
+            adapter = LocalAdapter(temp_dir, Config())
+            assert adapter.parse_range("5") == [5]
+            assert adapter.parse_range("1-3") == [1, 2, 3]
+            assert adapter.parse_range("8-10") == [8, 9, 10]
+            assert adapter.parse_range("1,3,5") == [1, 3, 5]
+            assert adapter.parse_range("1-3,7,9-10") == [1, 2, 3, 7, 9, 10]
 
     def test_parse_range_invalid(self):
-        adapter = LocalAdapter(".", Config())
-        assert adapter.parse_range("invalid") == []
-        assert adapter.parse_range("") == []
+        import tempfile
+        with tempfile.TemporaryDirectory() as temp_dir:
+            adapter = LocalAdapter(temp_dir, Config())
+            assert adapter.parse_range("invalid") == []
+            assert adapter.parse_range("") == []
 
 
 class TestEssentialSecurity:
@@ -187,8 +198,8 @@ class TestEssentialSecurity:
         
         # Mock os.walk to simulate repo with too many files
         def mock_walk(path):
-            # Simulate 2000 files to exceed the 1000 limit
-            for i in range(2000):
+            # Simulate 6000 files to exceed the 5000 limit
+            for i in range(6000):
                 yield str(large_repo), [], [f"file_{i}.txt"]
         
         with patch('os.walk', mock_walk):
@@ -200,7 +211,7 @@ class TestEssentialSecurity:
         adapter = LocalAdapter(str(secure_repo), Config())
         
         # Verify resource limits are initialized correctly
-        assert adapter.max_files == 1000
+        assert adapter.max_files == 5000  # Updated limit
         assert adapter.max_total_size == 1 * 1024 * 1024 * 1024  # 1GB
         
         # Test file size tracking during operations

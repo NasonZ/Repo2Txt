@@ -67,10 +67,10 @@ class FileTreeBuilder:
             
             # Add the file node
             file_node = FileNode(
-                path=file_path,
+                path=PathUtils.normalize_path(file_path),  # Store normalized path
                 name=parts[-1],  # Just the filename
                 type="file",
-                token_count=token_data.get(file_path, 0)
+                token_count=token_data.get(file_path, 0)  # Use original path for token lookup
             )
             current_node.children.append(file_node)
         

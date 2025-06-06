@@ -93,14 +93,22 @@ class TestFileAnalyzerSecurity:
     
     def test_null_byte_detection(self, analyzer):
         """IMPORTANT: Test null byte detection prevents content injection."""
-        with patch('os.path.getsize', return_value=100):
-            # Content with null bytes should be detected as binary
-            with patch('builtins.open', mock_open(read_data=b'content\x00injection')):
-                content, error = analyzer.read_file_content("/path/to/file.txt")
+        import tempfile
+        import os
+        
+        # Create real temporary file with null bytes
+        with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
+            tmp_file.write(b'content\x00injection')
+            tmp_file.flush()
+            
+            try:
+                content, error = analyzer.read_file_content(tmp_file.name)
                 
                 # Should detect as binary due to null bytes
                 assert content is None, "File with null bytes was not detected as binary"
                 assert error == "Binary file"
+            finally:
+                os.unlink(tmp_file.name)
     
     def test_binary_content_detection(self, analyzer):
         """IMPORTANT: Test binary detection prevents malicious content parsing."""

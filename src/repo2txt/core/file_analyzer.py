@@ -58,12 +58,7 @@ class FileAnalyzer:
             elif path.name == pattern:
                 return True
         
-        # Use mimetypes as fallback
-        mime_type, _ = mimetypes.guess_type(file_path)
-        if mime_type:
-            return not mime_type.startswith('text/')
-        
-        # If we have content, check for binary data
+        # If we have content, check for binary data first (more reliable than mimetypes)
         if content:
             # Check for null bytes in first 8192 bytes
             sample = content[:8192]
@@ -73,9 +68,18 @@ class FileAnalyzer:
             # Try to decode as text
             try:
                 sample.decode('utf-8')
+                # If we can decode it, use mimetypes as final check
+                mime_type, _ = mimetypes.guess_type(file_path)
+                if mime_type:
+                    return not mime_type.startswith('text/')
                 return False
             except UnicodeDecodeError:
                 return True
+        
+        # If no content provided, use mimetypes as fallback
+        mime_type, _ = mimetypes.guess_type(file_path)
+        if mime_type:
+            return not mime_type.startswith('text/')
         
         return False
     
