@@ -51,6 +51,8 @@ graph TD
 ### **Processing Pipeline**
 - **`core/file_analyzer.py`**: Content processing and token counting
 - **`utils/console.py`**: Rich terminal UI with theme support
+- **`utils/path_utils.py`**: Cross-platform path normalization utilities
+- **`utils/tree_builder.py`**: Centralized FileNode tree construction
 
 ## Manual vs AI Workflows
 
@@ -142,6 +144,7 @@ Users need immediate feedback about token budget usage. Both manual and AI workf
 - **File loading**: Lazy loading - only selected files loaded into memory
 - **AI responses**: Streaming for reduced perceived latency
 - **GitHub API**: Efficient batching with rate limit awareness
+- **Tree building**: Consolidated utilities eliminate duplicate implementations and ensure consistent hierarchical structures
 
 ---
 

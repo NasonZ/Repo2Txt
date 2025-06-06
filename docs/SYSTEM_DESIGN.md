@@ -377,6 +377,7 @@ class TokenCache:
 **Only load what you need**: Selected files are loaded on-demand, not all at once.
 **Streaming**: Large outputs are streamed rather than built in memory.
 **Parallel processing**: Multiple files can be processed simultaneously.
+**Consolidated tree building**: Shared utilities eliminate duplicate tree construction logic across components.
 
 ### Network Optimisation
 
@@ -406,7 +407,9 @@ src/repo2txt/
 └── utils/              # Shared utilities
     ├── console.py          # Terminal UI
     ├── encodings.py        # File encoding detection
-    └── file_filter.py      # File filtering logic
+    ├── file_filter.py      # File filtering logic
+    ├── path_utils.py       # Cross-platform path handling
+    └── tree_builder.py     # Centralized tree construction
 ```
 
 ### Key Data Models
