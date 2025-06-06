@@ -114,7 +114,9 @@ class AsyncGitHubClient:
                     
             except Exception as e:
                 # prevent token exposure
-                safe_error = self._sanitize_error(str(e), [self.token])
+                safe_error = str(e)
+                if self.token and self.token in safe_error:
+                    safe_error = safe_error.replace(self.token, "[REDACTED]")
                 return FileResult(file_path, error=f"Network error: {safe_error}")
 
 
@@ -230,7 +232,24 @@ class GitHubAdapter(RepositoryAdapter):
             contents = self.repo.get_contents(path, ref=self.branch)
             items = []
             
+            # Calculate expected path depth for direct children
+            if path:
+                expected_prefix = path + "/"
+                expected_depth = path.count('/') + 2  # path depth + 1 for the child
+            else:
+                expected_prefix = ""
+                expected_depth = 1  # root level children
+            
             for content in sorted(contents, key=lambda x: (x.type != 'dir', x.name)):
+                # Only include direct children by checking path depth
+                content_depth = content.path.count('/') + 1
+                if content_depth != expected_depth:
+                    continue
+                
+                # Verify this is actually a direct child of the requested path
+                if path and not content.path.startswith(expected_prefix):
+                    continue
+                    
                 # Apply same filtering as local adapter
                 if content.name.startswith('.') and content.name not in {'.gitlab'}:
                     continue  # Skip hidden files except certain dirs
@@ -239,7 +258,6 @@ class GitHubAdapter(RepositoryAdapter):
                     items.append((content.name, 'dir', 0))
                 elif content.type == 'file':
                     items.append((content.name, 'file', content.size))
-            
             return items
             
         except Exception as e:
@@ -249,6 +267,14 @@ class GitHubAdapter(RepositoryAdapter):
     
     def traverse_interactive(self) -> Tuple[str, Set[str], Dict[str, int]]:
         """Interactive traversal of repository."""
+        # Pre-scan the repository to build file tree with token counts
+        print("|>| Scanning repository structure...")
+        self._cached_file_tree = self._build_file_tree_with_tokens()
+        
+        # Build a lookup table for quick access to nodes by path
+        self._path_to_node = {}
+        self._build_path_lookup(self._cached_file_tree)
+        
         return self._traverse_interactive_impl("", self.branch)
     
     def _traverse_interactive_impl(self, path: str, branch: Optional[str]) -> Tuple[str, Set[str], Dict[str, int]]:
@@ -267,25 +293,29 @@ class GitHubAdapter(RepositoryAdapter):
         
         while True:
             try:
-                # Use filtered list_contents instead of direct repo.get_contents
+                # Get items from cached file tree
                 items = []
-                contents_list = self.list_contents(current_state['path'])
                 
-                for name, content_type, size in contents_list:
-                    if content_type == 'dir':
-                        # Get the actual GitHub content object for the directory
-                        try:
-                            content_obj = self.repo.get_contents(f"{current_state['path']}/{name}" if current_state['path'] else name, ref=branch)
-                            items.append((content_obj, 'dir'))
-                        except Exception:
-                            continue
-                    elif content_type == 'file':
-                        # Get the actual GitHub content object for the file
-                        try:
-                            content_obj = self.repo.get_contents(f"{current_state['path']}/{name}" if current_state['path'] else name, ref=branch)
-                            items.append((content_obj, 'file'))
-                        except Exception:
-                            continue
+                # Get the current node from the cached tree
+                current_node = self._path_to_node.get(current_state['path'], None)
+                if current_node is None and current_state['path'] == "":
+                    # Root node
+                    current_node = self._cached_file_tree
+                
+                if current_node and current_node.type == 'dir':
+                    # Create content objects from cached node children
+                    class CachedContent:
+                        def __init__(self, node: FileNode):
+                            self.name = node.name
+                            self.path = node.path
+                            self.type = 'dir' if node.type == 'dir' else 'file'
+                            self.size = node.size if node.type == 'file' else 0
+                            self.encoding = 'base64' if node.type == 'file' else None
+                            self.total_tokens = node.total_tokens
+                    
+                    for child in sorted(current_node.children, key=lambda x: (x.type != 'dir', x.name)):
+                        content_obj = CachedContent(child)
+                        items.append((content_obj, child.type))
                 
                 if not items:
                     if navigation_stack:
@@ -299,21 +329,17 @@ class GitHubAdapter(RepositoryAdapter):
                 print(f"\n|>| Contents of {current_state['path'] or 'root'}:\n")
                 for i, (content, item_type) in enumerate(items, start=1):
                     if item_type == 'file' and self.config.enable_token_counting:
-                        # Show token estimate for files
-                        if content.encoding != 'none' and not self.file_analyzer.is_binary_file(content.path):
-                            try:
-                                file_content = content.decoded_content.decode('utf-8')
-                                tokens = self.file_analyzer.count_tokens(file_content)
-                                print(f"    {i:2d}.   {content.name:<28} ~{tokens:,} tokens")
-                            except:
-                                print(f"    {i:2d}.   {content.name:<28} decode error")
+                        # Show token estimate for files (already cached)
+                        if hasattr(content, 'total_tokens') and content.total_tokens > 0:
+                            print(f"    {i:2d}.   {content.name:<28} ~{content.total_tokens:,} tokens")
+                        elif not self.file_analyzer.is_binary_file(content.path):
+                            print(f"    {i:2d}.   {content.name:<28} ~0 tokens")
                         else:
                             print(f"    {i:2d}.   {content.name:<28} binary")
                     elif item_type == 'dir' and self.config.enable_token_counting:
-                        # Show aggregate token estimates for directories
-                        dir_tokens = self._estimate_directory_tokens(content.path, branch)
-                        if dir_tokens > 0:
-                            print(f"    {i:2d}. ▸ {content.name:<28} ~{dir_tokens:,} tokens")
+                        # Show aggregate token estimates for directories (from cache)
+                        if hasattr(content, 'total_tokens') and content.total_tokens > 0:
+                            print(f"    {i:2d}. ▸ {content.name:<28} ~{content.total_tokens:,} tokens")
                         else:
                             print(f"    {i:2d}. ▸ {content.name:<28} empty")
                     else:
@@ -384,15 +410,10 @@ class GitHubAdapter(RepositoryAdapter):
                             temp_structure += f"{content.path}\n"
                             temp_selected.add(content.path)
                             
-                            # Count tokens if enabled
-                            if self.config.enable_token_counting and content.encoding != 'none':
-                                try:
-                                    file_content = content.decoded_content.decode('utf-8')
-                                    tokens = self.file_analyzer.count_tokens(file_content)
-                                    if tokens > 0:
-                                        temp_tokens[content.path] = tokens
-                                except Exception:
-                                    pass
+                            # Use cached token count
+                            if self.config.enable_token_counting and hasattr(content, 'total_tokens'):
+                                if content.total_tokens > 0:
+                                    temp_tokens[content.path] = content.total_tokens
                     else:
                         # Not selected
                         if item_type == 'dir':
@@ -706,6 +727,108 @@ class GitHubAdapter(RepositoryAdapter):
         except Exception as e:
             self.errors.append(f"Error building tree for {path}: {e}")
     
+    def _build_file_tree_with_tokens(self) -> FileNode:
+        """Build file tree with actual token counts (for interactive mode)."""
+        print("|>| Building file tree...")
+        root = FileNode(
+            path="",
+            name=self.repo_name,
+            type='dir'
+        )
+        
+        # First build the tree structure
+        self._build_tree_recursive("", root, self.branch)
+        
+        # Then count tokens for all files
+        if self.config.enable_token_counting:
+            print("|>| Counting tokens...")
+            # First count total files
+            total_files = self._count_files(root)
+            # Then count tokens with progress
+            self._files_processed = 0
+            self._count_tokens_recursive_with_progress(root, total_files)
+        
+        # Aggregate total tokens for directories
+        self._aggregate_directory_tokens(root)
+        
+        # Clear the progress line
+        if self.config.enable_token_counting:
+            print()  # New line after progress
+        
+        return root
+    
+    def _count_files(self, node: FileNode) -> int:
+        """Count total number of files in the tree."""
+        if node.type == 'file':
+            return 1
+        total = 0
+        for child in node.children:
+            total += self._count_files(child)
+        return total
+    
+    def _count_tokens_recursive_with_progress(self, node: FileNode, total_files: int) -> None:
+        """Recursively count tokens with progress tracking."""
+        if node.type == 'file':
+            try:
+                # Get file content and count tokens
+                content_obj = self.repo.get_contents(node.path, ref=self.branch)
+                if content_obj.encoding != 'none' and not self.file_analyzer.is_binary_file(node.path):
+                    file_content = content_obj.decoded_content.decode('utf-8')
+                    node.token_count = self.file_analyzer.count_tokens(file_content)
+                    node.total_tokens = node.token_count
+            except:
+                node.token_count = 0
+                node.total_tokens = 0
+            
+            # Update progress
+            self._files_processed += 1
+            if self._files_processed % 10 == 0 or self._files_processed == total_files:
+                print(f"\r|>| Processed {self._files_processed}/{total_files} files...", end='', flush=True)
+        else:
+            # Process children first
+            for child in node.children:
+                self._count_tokens_recursive_with_progress(child, total_files)
+    
+    def _count_tokens_recursive(self, node: FileNode) -> None:
+        """Recursively count tokens for all files in the tree."""
+        if node.type == 'file':
+            try:
+                # Get file content and count tokens
+                content_obj = self.repo.get_contents(node.path, ref=self.branch)
+                if content_obj.encoding != 'none' and not self.file_analyzer.is_binary_file(node.path):
+                    file_content = content_obj.decoded_content.decode('utf-8')
+                    node.token_count = self.file_analyzer.count_tokens(file_content)
+                    node.total_tokens = node.token_count
+            except:
+                node.token_count = 0
+                node.total_tokens = 0
+        else:
+            # Process children first
+            for child in node.children:
+                self._count_tokens_recursive(child)
+    
+    def _aggregate_directory_tokens(self, node: FileNode) -> int:
+        """Aggregate token counts for directories (bottom-up)."""
+        if node.type == 'file':
+            return node.token_count
+        
+        total = 0
+        for child in node.children:
+            total += self._aggregate_directory_tokens(child)
+        
+        node.total_tokens = total
+        return total
+    
+    def _build_path_lookup(self, node: FileNode, parent_path: str = "") -> None:
+        """Build a path-to-node lookup table for quick access."""
+        # Store this node
+        self._path_to_node[node.path] = node
+        
+        # Recursively process children
+        if node.type == 'dir':
+            for child in node.children:
+                self._build_path_lookup(child, node.path)
+    
     def build_file_tree_string(self) -> str:
         """
         Build a text representation of the repository file tree.
@@ -889,3 +1012,11 @@ class GitHubAdapter(RepositoryAdapter):
                 token_data[path] = 0
         
         return file_contents, token_data
+    
+    def _sanitize_error(self, error_msg: str, secrets: List[str]) -> str:
+        """Remove sensitive information from error messages."""
+        sanitized = error_msg
+        for secret in secrets:
+            if secret and secret in sanitized:
+                sanitized = sanitized.replace(secret, "[REDACTED]")
+        return sanitized
