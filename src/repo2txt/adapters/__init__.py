@@ -94,7 +94,7 @@ def _path_exists(path_str: str) -> bool:
     return False
 
 
-def create_adapter(repo_url_or_path: str, config: Config) -> RepositoryAdapter:
+def create_adapter(repo_url_or_path: str, config: Config, validate_size: bool = True) -> RepositoryAdapter:
     """
     Create appropriate repository adapter based on input.
     
@@ -128,16 +128,16 @@ def create_adapter(repo_url_or_path: str, config: Config) -> RepositoryAdapter:
             # Use normalized path for the adapter
             normalized_path = _normalize_path(repo_url_or_path)
             if os.path.isdir(normalized_path):
-                return LocalAdapter(normalized_path, config)
+                return LocalAdapter(normalized_path, config, validate_size)
             else:
-                return LocalAdapter(repo_url_or_path, config)  # Let LocalAdapter handle the error
+                return LocalAdapter(repo_url_or_path, config, validate_size)  # Let LocalAdapter handle the error
         
         # Check if path exists but is not a directory
         if _path_exists(repo_url_or_path):
             raise ValueError(f"Path exists but is not a directory: {repo_url_or_path}")
         
         # Path doesn't exist - still try LocalAdapter (it will provide a better error)
-        return LocalAdapter(repo_url_or_path, config)
+        return LocalAdapter(repo_url_or_path, config, validate_size)
     
     # Check if it might be a GitHub shorthand (owner/repo)
     if '/' in repo_url_or_path and len(repo_url_or_path.split('/')) == 2:

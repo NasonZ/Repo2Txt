@@ -152,7 +152,7 @@ class FileSelectorAgent:
         
         try:
             # Create adapter for the repository
-            adapter = create_adapter(str(self.repo_path), self.config)
+            adapter = create_adapter(str(self.repo_path), self.config, validate_size=False)
             repo_name = adapter.get_name()
             
             # Build file tree and get file list

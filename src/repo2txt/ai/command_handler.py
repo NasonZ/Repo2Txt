@@ -228,8 +228,8 @@ class CommandHandler:
                 self.ui.print_error(f"Cannot create output directory: {str(e)}")
                 return True
             
-            # Get the adapter to fetch file contents
-            adapter = create_adapter(str(self.agent.repo_path), self.agent.config)
+            # Get the adapter to fetch file contents (skip size validation for output generation)
+            adapter = create_adapter(str(self.agent.repo_path), self.agent.config, validate_size=False)
             
             # Collect file contents for selected files
             file_contents_list = []

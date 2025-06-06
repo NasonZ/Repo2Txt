@@ -7,6 +7,7 @@ import time
 import re
 
 from ..core.models import Config, AnalysisResult, FileNode
+from ..core.file_analyzer import FileAnalyzer
 from ..adapters import create_adapter
 
 try:
@@ -551,7 +552,7 @@ Please analyze this repository to understand its structure, purpose, and functio
             # Generate token data for selected files
             token_data = {}
             if self.config.enable_token_counting:
-                # Re-use file_analyzer from above
+                # Use the adapter's file_analyzer for token counting
                 print(f"|>| Recalculating tokens for {len(selected_files)} selected files...")
                 
                 if RICH_AVAILABLE:
@@ -567,7 +568,7 @@ Please analyze this repository to understand its structure, purpose, and functio
                         for file_path in selected_files:
                             content, error = adapter.get_file_content(file_path)
                             if content and not error:
-                                tokens = file_analyzer.count_tokens(content)
+                                tokens = adapter.file_analyzer.count_tokens(content)
                                 if tokens > 0:
                                     token_data[file_path] = tokens
                             progress.advance(task)
@@ -576,7 +577,7 @@ Please analyze this repository to understand its structure, purpose, and functio
                     for file_path in tqdm(selected_files, desc="Final token count"):
                         content, error = adapter.get_file_content(file_path)
                         if content and not error:
-                            tokens = file_analyzer.count_tokens(content)
+                            tokens = adapter.file_analyzer.count_tokens(content)
                             if tokens > 0:
                                 token_data[file_path] = tokens
             
@@ -601,6 +602,10 @@ Please analyze this repository to understand its structure, purpose, and functio
     def _extract_token_data_from_tree(self, file_tree: FileNode, token_data: Dict[str, int]) -> None:
         """Extract token data from the file tree."""
         def extract_recursive(node: FileNode):
+            # ensure node is a FileNode
+            if not isinstance(node, FileNode):
+                return
+                
             if node.is_file():
                 # Extract token data from file node
                 if node.token_count and node.token_count > 0:
@@ -610,13 +615,22 @@ Please analyze this repository to understand its structure, purpose, and functio
                 for child in node.children:
                     extract_recursive(child)
         
-        extract_recursive(file_tree)
+        if isinstance(file_tree, FileNode):
+            extract_recursive(file_tree)
     
     def _format_file_tree_string(self, file_tree: FileNode) -> str:
         """Convert FileNode tree to string representation."""
+        if not isinstance(file_tree, FileNode):
+            return f"Error: Expected FileNode, got {type(file_tree)}"
+            
         lines = []
         
         def format_recursive(node: FileNode, prefix: str = "", is_last: bool = True):
+            # ensure node is a FileNode
+            if not isinstance(node, FileNode):
+                lines.append(f"{prefix}[ERROR: Expected FileNode, got {type(node)}]")
+                return
+                
             connector = "└── " if is_last else "├── "
             lines.append(f"{prefix}{connector}{node.name}")
             
@@ -635,6 +649,10 @@ Please analyze this repository to understand its structure, purpose, and functio
         
         def update_recursive(node: FileNode):
             nonlocal updated_count
+            # ensure node is a FileNode
+            if not isinstance(node, FileNode):
+                return
+                
             if node.is_file():
                 # Update token count for file node
                 if node.path in token_data:
@@ -648,4 +666,5 @@ Please analyze this repository to understand its structure, purpose, and functio
                 # Then recalculate this directory's total
                 node.total_tokens = sum(c.total_tokens for c in node.children)
         
-        update_recursive(file_tree)
+        if isinstance(file_tree, FileNode):
+            update_recursive(file_tree)

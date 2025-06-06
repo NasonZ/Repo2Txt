@@ -11,7 +11,7 @@ from .base import RepositoryAdapter
 class LocalAdapter(RepositoryAdapter):
     """Adapter for analyzing local repositories."""
     
-    def __init__(self, repo_path: str, config: Config):
+    def __init__(self, repo_path: str, config: Config, validate_size: bool = True):
         """Initialize local adapter with repository path."""
         super().__init__(config)
         
@@ -22,8 +22,9 @@ class LocalAdapter(RepositoryAdapter):
         self.repo_path = os.path.abspath(repo_path)
         self.repo_name = os.path.basename(self.repo_path)
         
-        # Validate repo size before processing
-        self._validate_repo_size()
+        # Validate repo size before processing (skip for output generation)
+        if validate_size:
+            self._validate_repo_size()
         
         print(f"|>| Analyzing local repository: {self.repo_name}")
     

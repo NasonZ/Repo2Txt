@@ -68,7 +68,7 @@ class Config:
     output_format: Literal['xml', 'markdown'] = 'markdown'  # Output format for file contents
     
     # Security limits
-    max_files: int = 1500  # Maximum files per repository
+    max_files: int = 5000  # Maximum files per repository
     max_total_size: int = 1024 * 1024 * 1024  # 1GB total size limit
     
     # AI Selection settings
@@ -134,9 +134,18 @@ class AnalysisResult:
         if not self.file_tree:
             return ""
         
+        # ensure file_tree is a FileNode and not a list
+        if not isinstance(self.file_tree, FileNode):
+            return f"Error: file_tree is not a FileNode (got {type(self.file_tree)})"
+        
         lines = []
         
         def format_recursive(node: FileNode, prefix: str = "", is_last: bool = True):
+            # ensure node is a FileNode
+            if not isinstance(node, FileNode):
+                lines.append(f"{prefix}[ERROR: Expected FileNode, got {type(node)}]")
+                return
+                
             connector = "└── " if is_last else "├── "
             lines.append(f"{prefix}{connector}{node.name}")
             
@@ -159,13 +168,17 @@ class AnalysisResult:
         token_data = {}
         
         def extract_recursive(node: FileNode):
+            # ensure node is a FileNode
+            if not isinstance(node, FileNode):
+                return
+                
             if node.is_file() and node.token_count and node.token_count > 0:
                 token_data[node.path] = node.token_count
             else:
                 for child in node.children:
                     extract_recursive(child)
         
-        if self.file_tree:
+        if self.file_tree and isinstance(self.file_tree, FileNode):
             extract_recursive(self.file_tree)
         return token_data
     
