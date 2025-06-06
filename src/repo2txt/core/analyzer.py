@@ -3,8 +3,10 @@ import os
 from datetime import datetime
 from collections import defaultdict
 from typing import Dict, List, Optional, Tuple, Set
+import time
+import re
 
-from ..core.models import Config, AnalysisResult
+from ..core.models import Config, AnalysisResult, FileNode
 from ..adapters import create_adapter
 
 try:
@@ -69,17 +71,52 @@ class RepositoryAnalyzer:
         total_tokens = sum(token_data.values())
         total_files = len(selected_paths)
         
-        return AnalysisResult(
+        # Create a simple file tree from the structure string and file paths
+        # For now, create a minimal tree structure - this can be enhanced later
+        root_node = FileNode(
+            path=repo_name,
+            name=repo_name,
+            type="dir"
+        )
+        
+        # Create file nodes for each selected path
+        for file_path in selected_paths:
+            file_node = FileNode(
+                path=file_path,
+                name=os.path.basename(file_path),
+                type="file",
+                token_count=token_data.get(file_path, 0)
+            )
+            root_node.children.append(file_node)
+        
+        # Prepare data for AnalysisResult creation
+        total_tokens_calc = sum(token_data.values()) if self.config.enable_token_counting else 0
+        file_list = []
+        if self.config.enable_token_counting:
+            file_list = [
+                {'path': path, 'tokens': token_data.get(path, 0)}
+                for path in selected_paths
+            ]
+        else:
+            file_list = [{'path': path, 'tokens': 0} for path in selected_paths]
+        
+        # Create analysis result with unified constructor - NO dynamic attributes!
+        analysis_result = AnalysisResult(
+            repo_path=str(adapter.repo_path) if hasattr(adapter, 'repo_path') else repo_name,
             repo_name=repo_name,
+            file_tree=root_node,
+            file_paths=list(selected_paths),
+            total_files=total_files,
             branch=branch,
             readme_content=readme_content,
-            structure=structure,
+            total_tokens=total_tokens_calc,
             file_contents=file_contents,
             token_data=token_data,
-            total_tokens=total_tokens,
-            total_files=total_files,
-            errors=adapter.errors
+            errors=adapter.errors,
+            file_list=file_list
         )
+        
+        return analysis_result
     
     def generate_instructions(self, result: AnalysisResult) -> str:
         """Generate analysis instructions for the output."""
@@ -280,6 +317,17 @@ Please analyze this repository to understand its structure, purpose, and functio
         
         return report
     
+    def _sanitize_filename(self, name: str) -> str:
+        """Sanitize a string for use as a filename or directory name."""
+        # Replace invalid characters with underscores
+        sanitized = re.sub(r'[<>:"/\\|?*]', '_', name)
+        # Remove any trailing dots or spaces (Windows issue)
+        sanitized = sanitized.rstrip('. ')
+        # Limit length to avoid path length issues
+        if len(sanitized) > 100:
+            sanitized = sanitized[:100]
+        return sanitized
+    
     def save_results(self, result: AnalysisResult, output_dir: str = "output") -> Dict[str, str]:
         """
         Save analysis results to files.
@@ -293,7 +341,8 @@ Please analyze this repository to understand its structure, purpose, and functio
         """
         # Create output directory structure
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        repo_output_dir = os.path.join(output_dir, f"{result.repo_name}_{timestamp}")
+        sanitized_repo_name = self._sanitize_filename(result.repo_name)
+        repo_output_dir = os.path.join(output_dir, f"{sanitized_repo_name}_{timestamp}")
         os.makedirs(repo_output_dir, exist_ok=True)
         
         output_files = {}
@@ -337,7 +386,7 @@ Please analyze this repository to understand its structure, purpose, and functio
         
         # Save main analysis with appropriate extension
         file_extension = '.md' if self.config.output_format == 'markdown' else '.txt'
-        main_path = os.path.join(repo_output_dir, f"{result.repo_name}_analysis{file_extension}")
+        main_path = os.path.join(repo_output_dir, f"{sanitized_repo_name}_analysis{file_extension}")
         with open(main_path, 'w', encoding='utf-8') as f:
             f.write(main_content)
         output_files['main'] = main_path
@@ -345,7 +394,7 @@ Please analyze this repository to understand its structure, purpose, and functio
         # Save token report if enabled
         if self.config.enable_token_counting and result.token_data:
             token_report = self.generate_token_report(result.token_data)
-            token_path = os.path.join(repo_output_dir, f"{result.repo_name}_token_report.txt")
+            token_path = os.path.join(repo_output_dir, f"{sanitized_repo_name}_token_report.txt")
             with open(token_path, 'w', encoding='utf-8') as f:
                 f.write(token_report)
             output_files['tokens'] = token_path
@@ -361,7 +410,7 @@ Please analyze this repository to understand its structure, purpose, and functio
                 'files': result.token_data,
                 'timestamp': timestamp
             }
-            json_path = os.path.join(repo_output_dir, f"{result.repo_name}_tokens.json")
+            json_path = os.path.join(repo_output_dir, f"{sanitized_repo_name}_tokens.json")
             with open(json_path, 'w', encoding='utf-8') as f:
                 json.dump(json_data, f, indent=2)
             output_files['json'] = json_path
@@ -384,14 +433,21 @@ Please analyze this repository to understand its structure, purpose, and functio
             # Import here to avoid circular import issues
             from ..ai import FileSelectorAgent, get_llm_config_from_env
             
-            # Build file tree and get file list using adapter methods
-            print(f"|>| Building file tree...")
+            # Build file tree structure
+            print("|>| Building file tree...")
+            file_tree = adapter.build_file_tree()
             
-            # Get LLM configuration from environment first
-            llm_config = get_llm_config_from_env()
+            # Build string representation if needed for compatibility
+            file_tree_str = adapter.build_file_tree_string() if hasattr(adapter, 'build_file_tree_string') else self._format_file_tree_string(file_tree)
             
-            # Add progress tracking for file discovery
-            if RICH_AVAILABLE:
+            # Get file list with progress
+            print(f"|>| Scanning repository structure...")
+            scan_start = time.time()
+            
+            try:
+                from rich.progress import Progress, TextColumn, BarColumn, TimeElapsedColumn
+                
+                # Use rich progress for scanning
                 with Progress(
                     TextColumn("[progress.description]{task.description}"),
                     BarColumn(),
@@ -399,86 +455,68 @@ Please analyze this repository to understand its structure, purpose, and functio
                     TextColumn("Exploring..."),
                     TimeElapsedColumn(),
                 ) as progress:
-                    task = progress.add_task("Scanning repository", total=None)  # Indeterminate progress
-                    
-                    # Use combined method if available, otherwise fall back to separate calls
-                    if hasattr(adapter, 'build_file_tree_and_list'):
-                        file_tree_str, file_paths = adapter.build_file_tree_and_list()
-                    else:
-                        file_tree_str = adapter.build_file_tree()
-                        progress.update(task, description="Collecting file list")
-                        file_paths = adapter.get_file_list()
-                    
-                    progress.update(task, completed=100, total=100, description=f"|>| Scan complete: {len(file_paths)} files found")
-            else:
-                print("|>| Scanning repository structure...")
-                if hasattr(adapter, 'build_file_tree_and_list'):
-                    file_tree_str, file_paths = adapter.build_file_tree_and_list()
-                else:
-                    file_tree_str = adapter.build_file_tree()
+                    task = progress.add_task("Scanning files", total=1)
                     file_paths = adapter.get_file_list()
-
-            # Convert file paths to the format expected by AI agent
-            # The AI agent expects a list of dicts with 'path' and 'tokens' keys
-            file_list = []
-            total_tokens = 0
-            
-            if self.config.enable_token_counting:
-                from ..core.file_analyzer import FileAnalyzer
-                file_analyzer = FileAnalyzer(self.config)
+                    progress.advance(task)
+                    
+            except ImportError:
+                # Fallback if rich not available
+                file_paths = adapter.get_file_list()
                 
-                print(f"|>| Analyzing {len(file_paths)} files for token counts...")
-                
-                if RICH_AVAILABLE:
-                    # Use Rich progress bar
-                    with Progress(
-                        TextColumn("[progress.description]{task.description}"),
-                        BarColumn(),
-                        TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
-                        TextColumn("{task.completed}/{task.total}"),
-                        TimeElapsedColumn(),
-                    ) as progress:
-                        task = progress.add_task("|>| Counting tokens", total=len(file_paths))
-                        for file_path in file_paths:
-                            content, error = adapter.get_file_content(file_path)
-                            tokens = 0
-                            if content and not error:
-                                tokens = file_analyzer.count_tokens(content)
-                            file_list.append({'path': file_path, 'tokens': tokens})
-                            total_tokens += tokens
-                            progress.advance(task)
-                else:
-                    # Fallback to tqdm if Rich not available
-                    for file_path in tqdm(file_paths, desc="Counting tokens"):
-                        content, error = adapter.get_file_content(file_path)
-                        tokens = 0
-                        if content and not error:
-                            tokens = file_analyzer.count_tokens(content)
-                        file_list.append({'path': file_path, 'tokens': tokens})
-                        total_tokens += tokens
+            scan_duration = time.time() - scan_start
+            if scan_duration < 60:
+                print(f"|>| Scan complete: {len(file_paths)} files found - Completed in {scan_duration:.1f}s")
             else:
-                # No token counting, just create the dict structure
+                minutes = int(scan_duration // 60)
+                seconds = scan_duration % 60
+                print(f"|>| Scan complete: {len(file_paths)} files found - Completed in {minutes}m {seconds:.1f}s")
+
+            # Extract token data from the tree (for local repos only - GitHub repos skip token counting during tree building)
+            token_data = {}
+            if self.config.enable_token_counting:
+                self._extract_token_data_from_tree(file_tree, token_data)
+                
+                # If this is a GitHub repo and we have no token data (because we skipped counting during tree building),
+                # count tokens for all files asynchronously
+                if not token_data and hasattr(adapter, 'owner'):  # GitHub adapter has 'owner' attribute
+                    try:
+                        # Use the async processing capability of GitHub adapter
+                        file_contents_dict, token_data = adapter._run_async_processing(file_paths)
+                        print(f"|>| Token counting complete: {sum(token_data.values()):,} total tokens")
+                        
+                        # Update the file tree with actual token counts (no verbose messages)
+                        self._update_tree_with_tokens(file_tree, token_data)
+                    except Exception as e:
+                        print(f"[!] Async token counting failed: {e}")
+                        # Fall back to no token counting for tree display
+                        token_data = {}
+            
+            # Prepare data for AnalysisResult creation
+            total_tokens_calc = sum(token_data.values()) if self.config.enable_token_counting else 0
+            file_list = []
+            if self.config.enable_token_counting:
+                file_list = [
+                    {'path': path, 'tokens': token_data.get(path, 0)}
+                    for path in file_paths
+                ]
+            else:
                 file_list = [{'path': path, 'tokens': 0} for path in file_paths]
             
-            # Create analysis result with our pre-analyzed data
-            from ..core.models import AnalysisResult, FileNode
+            # Create analysis result with unified constructor - NO dynamic attributes!
             analysis_result = AnalysisResult(
+                repo_path=str(adapter.repo_path) if hasattr(adapter, 'repo_path') else repo_name,
                 repo_name=repo_name,
-                branch=None,
+                file_tree=file_tree,
+                file_paths=file_paths,
+                total_files=len(file_paths),
+                branch=getattr(adapter, 'branch', None),
                 readme_content=readme_content,
-                structure=file_tree_str,
-                file_contents="",  # Not needed for selection
-                token_data={},
-                total_tokens=total_tokens,
-                total_files=len(file_list),
-                errors=adapter.errors
+                total_tokens=total_tokens_calc,
+                file_contents="",  # Will be filled later by selected files
+                token_data=token_data if self.config.enable_token_counting else {},
+                errors=adapter.errors,
+                file_list=file_list
             )
-            
-            # Add file_tree and file_list as dynamic attributes (expected by AI agent)
-            # For now, we'll pass the string representation as file_tree
-            # The AI agent will need to handle this appropriately
-            analysis_result.file_tree = file_tree_str
-            analysis_result.file_list = file_list
             
             # Get the actual repository path from adapter
             repo_path = adapter.repo_path if hasattr(adapter, 'repo_path') else ""
@@ -486,9 +524,9 @@ Please analyze this repository to understand its structure, purpose, and functio
             # Initialize the AI agent with pre-analyzed data
             agent = FileSelectorAgent(
                 repo_path=repo_path,
-                openai_api_key=llm_config['api_key'],
-                model=llm_config['model'],
-                base_url=llm_config.get('base_url'),
+                openai_api_key=get_llm_config_from_env()['api_key'],
+                model=get_llm_config_from_env()['model'],
+                base_url=get_llm_config_from_env().get('base_url'),
                 theme=self.theme,
                 token_budget=self.config.token_budget,
                 debug_mode=self.config.debug,
@@ -559,3 +597,55 @@ Please analyze this repository to understand its structure, purpose, and functio
                 traceback.print_exc()
             print("|>| Falling back to interactive selection...")
             return adapter.traverse_interactive()
+
+    def _extract_token_data_from_tree(self, file_tree: FileNode, token_data: Dict[str, int]) -> None:
+        """Extract token data from the file tree."""
+        def extract_recursive(node: FileNode):
+            if node.is_file():
+                # Extract token data from file node
+                if node.token_count and node.token_count > 0:
+                    token_data[node.path] = node.token_count
+            else:
+                # Process children recursively
+                for child in node.children:
+                    extract_recursive(child)
+        
+        extract_recursive(file_tree)
+    
+    def _format_file_tree_string(self, file_tree: FileNode) -> str:
+        """Convert FileNode tree to string representation."""
+        lines = []
+        
+        def format_recursive(node: FileNode, prefix: str = "", is_last: bool = True):
+            connector = "└── " if is_last else "├── "
+            lines.append(f"{prefix}{connector}{node.name}")
+            
+            if node.is_dir():
+                extension = "    " if is_last else "│   "
+                for i, child in enumerate(sorted(node.children, key=lambda x: (x.is_file(), x.name))):
+                    is_child_last = (i == len(node.children) - 1)
+                    format_recursive(child, prefix + extension, is_child_last)
+        
+        format_recursive(file_tree)
+        return "\n".join(lines)
+
+    def _update_tree_with_tokens(self, file_tree: FileNode, token_data: Dict[str, int]) -> None:
+        """Update the file tree with actual token counts."""
+        updated_count = 0
+        
+        def update_recursive(node: FileNode):
+            nonlocal updated_count
+            if node.is_file():
+                # Update token count for file node
+                if node.path in token_data:
+                    node.token_count = token_data[node.path]
+                    node.total_tokens = node.token_count
+                    updated_count += 1
+            else:
+                # Process children recursively first
+                for child in node.children:
+                    update_recursive(child)
+                # Then recalculate this directory's total
+                node.total_tokens = sum(c.total_tokens for c in node.children)
+        
+        update_recursive(file_tree)

@@ -7,7 +7,7 @@ the application for configuration, file representation, and analysis results.
 
 import os
 from dataclasses import dataclass, field
-from typing import Dict, List, Set, Optional, Literal
+from typing import Dict, List, Set, Optional, Literal, Any
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
@@ -67,6 +67,10 @@ class Config:
     token_encoder: str = "cl100k_base"
     output_format: Literal['xml', 'markdown'] = 'markdown'  # Output format for file contents
     
+    # Security limits
+    max_files: int = 1500  # Maximum files per repository
+    max_total_size: int = 1024 * 1024 * 1024  # 1GB total size limit
+    
     # AI Selection settings
     ai_select: bool = False  # Enable AI-assisted file selection
     ai_query: Optional[str] = None  # Query for AI file selection
@@ -86,6 +90,8 @@ class FileNode:
     size: Optional[int] = None
     token_count: Optional[int] = None
     error: Optional[str] = None
+    children: List['FileNode'] = field(default_factory=list)
+    total_tokens: int = 0  # Total tokens including children
     
     def is_file(self) -> bool:
         """Check if this node represents a file."""
@@ -94,21 +100,78 @@ class FileNode:
     def is_directory(self) -> bool:
         """Check if this node represents a directory."""
         return self.type == 'dir'
+    
+    @property
+    def is_dir(self) -> bool:
+        """Alias for is_directory for compatibility."""
+        return self.is_directory()
 
 
 @dataclass
 class AnalysisResult:
-    """Results from analyzing a repository."""
+    """Result of repository analysis."""
     
+    # Required fields first
+    repo_path: str
     repo_name: str
-    branch: Optional[str]
-    readme_content: str
-    structure: str
-    file_contents: str
-    token_data: Dict[str, int]
-    total_tokens: int
-    total_files: int
-    errors: List[str]
+    file_tree: FileNode               # Hierarchical structure
+    file_paths: List[str]             # Flat list for iteration
+    total_files: int                  # Count
+    
+    # Optional fields with defaults
+    branch: Optional[str] = None
+    readme_content: Optional[str] = None
+    total_tokens: int = 0
+    file_contents: str = ""           # Generated file contents
+    token_data: Dict[str, int] = field(default_factory=dict)  # File path -> token count
+    errors: List[str] = field(default_factory=list)
+    file_list: List[Dict[str, Any]] = field(default_factory=list)  # [{'path': str, 'tokens': int}, ...]
+    
+    # Computed properties
+    @property
+    def file_tree_string(self) -> str:
+        """Generate string representation from FileNode tree."""
+        if not self.file_tree:
+            return ""
+        
+        lines = []
+        
+        def format_recursive(node: FileNode, prefix: str = "", is_last: bool = True):
+            connector = "└── " if is_last else "├── "
+            lines.append(f"{prefix}{connector}{node.name}")
+            
+            if node.is_dir:
+                extension = "    " if is_last else "│   "
+                for i, child in enumerate(sorted(node.children, key=lambda x: (x.is_file(), x.name))):
+                    is_child_last = (i == len(node.children) - 1)
+                    format_recursive(child, prefix + extension, is_child_last)
+        
+        format_recursive(self.file_tree)
+        return "\n".join(lines)
+    
+    @property
+    def structure(self) -> str:
+        """Alias for file_tree_string for legacy compatibility."""
+        return self.file_tree_string
+    
+    def extract_token_data_from_tree(self) -> Dict[str, int]:
+        """Extract token data from the file tree."""
+        token_data = {}
+        
+        def extract_recursive(node: FileNode):
+            if node.is_file() and node.token_count and node.token_count > 0:
+                token_data[node.path] = node.token_count
+            else:
+                for child in node.children:
+                    extract_recursive(child)
+        
+        if self.file_tree:
+            extract_recursive(self.file_tree)
+        return token_data
+    
+    def update_token_data_from_tree(self):
+        """Update the token_data field from the file tree."""
+        self.token_data = self.extract_token_data_from_tree()
     
     def has_errors(self) -> bool:
         """Check if any errors occurred during analysis."""
