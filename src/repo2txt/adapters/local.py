@@ -18,10 +18,48 @@ class LocalAdapter(RepositoryAdapter):
         if not os.path.isdir(repo_path):
             raise ValueError(f"Path is not a directory: {repo_path}")
         
+        # prevent traversal
         self.repo_path = os.path.abspath(repo_path)
         self.repo_name = os.path.basename(self.repo_path)
         
+        # Validate repo size before processing
+        self._validate_repo_size()
+        
         print(f"|>| Analyzing local repository: {self.repo_name}")
+    
+    def _validate_repo_size(self):
+        """Validate repository isn't too large to process safely."""
+        total_size = 0
+        file_count = 0
+        
+        # check size
+        for root, dirs, files in os.walk(self.repo_path):
+            # Apply exclusions during scan
+            dirs[:] = [d for d in dirs if d not in self.config.excluded_dirs]
+            
+            for file in files:
+                file_count += 1
+                if file_count > self.max_files:
+                    raise ValueError(f"Repository has too many files ({file_count}+). Maximum: {self.max_files}")
+                
+                file_path = os.path.join(root, file)
+                try:
+                    size = os.path.getsize(file_path)
+                    total_size += size
+                    if total_size > self.max_total_size:
+                        raise ValueError(f"Repository is too large ({total_size / 1024 / 1024:.1f}MB). Maximum: {self.max_total_size / 1024 / 1024:.1f}MB")
+                except OSError:
+                    pass
+    
+    def _is_safe_path(self, path: str) -> bool:
+        """Check if path is safe (within repo bounds)."""
+        try:
+            # Resolve to absolute path
+            abs_path = os.path.abspath(os.path.join(self.repo_path, path))
+            # check if it's within repo_path
+            return abs_path.startswith(self.repo_path + os.sep) or abs_path == self.repo_path
+        except (ValueError, OSError):
+            return False
     
     def get_name(self) -> str:
         """Get repository name."""
@@ -45,6 +83,11 @@ class LocalAdapter(RepositoryAdapter):
     
     def list_contents(self, path: str = "") -> List[Tuple[str, str, int]]:
         """List contents of a directory."""
+        # Validate path
+        if path and not self._is_safe_path(path):
+            self.errors.append(f"Invalid path: {path}")
+            return []
+        
         full_path = os.path.join(self.repo_path, path)
         
         try:
@@ -54,12 +97,21 @@ class LocalAdapter(RepositoryAdapter):
                     continue  # Skip hidden files except certain dirs
                     
                 item_path = os.path.join(full_path, item)
+                
+                # Skip symlinks to prevent traversal
+                if os.path.islink(item_path):
+                    continue
+                
                 if os.path.isdir(item_path):
                     if item not in self.config.excluded_dirs:
                         items.append((item, 'dir', 0))
                 else:
-                    size = os.path.getsize(item_path)
-                    items.append((item, 'file', size))
+                    try:
+                        size = os.path.getsize(item_path)
+                        items.append((item, 'file', size))
+                    except OSError:
+                        # Skip files we can't access
+                        continue
             
             return items
             
@@ -358,7 +410,15 @@ class LocalAdapter(RepositoryAdapter):
     
     def get_file_content(self, file_path: str) -> Tuple[Optional[str], Optional[str]]:
         """Get content of a specific file."""
+        # Validate path is safe
+        if not self._is_safe_path(file_path):
+            return None, f"Invalid path (outside repository): {file_path}"
+        
         full_path = os.path.join(self.repo_path, file_path)
+        
+        # Double-check resolved path is still safe
+        if not os.path.abspath(full_path).startswith(self.repo_path + os.sep):
+            return None, f"Path traversal attempt detected: {file_path}"
         
         if not os.path.exists(full_path):
             return None, f"File not found: {file_path}"
@@ -366,20 +426,23 @@ class LocalAdapter(RepositoryAdapter):
         if os.path.isdir(full_path):
             return None, f"Not a file: {file_path}"
         
+        # Resource protection: Track size
+        try:
+            file_size = os.path.getsize(full_path)
+            self.total_size_processed += file_size
+            self.files_processed += 1
+            
+            if self.files_processed > self.max_files:
+                return None, f"File limit exceeded ({self.max_files} files)"
+            
+            if self.total_size_processed > self.max_total_size:
+                return None, f"Total size limit exceeded ({self.max_total_size / 1024 / 1024:.1f}MB)"
+        except OSError:
+            pass
+        
         return self.file_analyzer.read_file_content(full_path)
     
-    def _format_file_content(self, file_path: str, content: Optional[str], error: Optional[str]) -> str:
-        """Format file content based on output format setting."""
-        if self.config.output_format == 'xml':
-            if content:
-                return f'<file path="{file_path}">\n{content}\n</file>\n'
-            else:
-                return f'<file path="{file_path}" error="{error}" />\n'
-        else:  # markdown
-            if content:
-                return f'```{file_path}\n{content}\n```\n'
-            else:
-                return f'```{file_path}\n# Error: {error}\n```\n'
+    # Note: _format_file_content is now inherited from base class
     
     def get_file_contents(self, selected_files: List[str]) -> Tuple[str, Dict[str, int]]:
         """Get contents of selected files."""
@@ -403,7 +466,85 @@ class LocalAdapter(RepositoryAdapter):
         
         return file_contents, token_data
     
-    def build_file_tree(self) -> str:
+    def build_file_tree(self) -> FileNode:
+        """
+        Build a hierarchical FileNode tree structure of the repository.
+        
+        Returns:
+            Root FileNode with children representing the file tree structure.
+        """
+        root = FileNode(
+            path=self.repo_path,
+            name=os.path.basename(self.repo_path) or self.repo_path,
+            type='dir'
+        )
+        self._build_tree_recursive(self.repo_path, root)
+        
+        # Aggregate total tokens for the root directory
+        root.total_tokens = sum(c.total_tokens for c in root.children)
+        
+        return root
+    
+    def _build_tree_recursive(self, path: str, node: FileNode) -> None:
+        """Recursively build file tree."""
+        try:
+            items = sorted(os.listdir(path))
+            
+            for item in items:
+                if item.startswith('.'):
+                    continue
+                    
+                item_path = os.path.join(path, item)
+                rel_path = os.path.relpath(item_path, self.repo_path)
+                
+                if os.path.isdir(item_path):
+                    if any(excluded in rel_path.split(os.sep) for excluded in self.config.excluded_dirs):
+                        continue
+                    
+                    child = FileNode(
+                        path=rel_path,
+                        name=item,
+                        type='dir'
+                    )
+                    node.children.append(child)
+                    self._build_tree_recursive(item_path, child)
+                    
+                    # Calculate total tokens for directory
+                    child.total_tokens = sum(c.total_tokens for c in child.children)
+                else:
+                    # Check if file should be included
+                    ext = os.path.splitext(item)[1].lower()
+                    if ext in self.config.binary_extensions:
+                        continue
+                    
+                    # Check file size
+                    try:
+                        size = os.path.getsize(item_path)
+                        if size > self.config.max_file_size:
+                            continue
+                    except:
+                        continue
+                    
+                    # Count tokens if enabled
+                    tokens = 0
+                    if self.config.enable_token_counting:
+                        content, error = self.file_analyzer.read_file_content(item_path)
+                        if content and not error:
+                            tokens = self.file_analyzer.count_tokens(content)
+                    
+                    child = FileNode(
+                        path=rel_path,
+                        name=item,
+                        type='file',
+                        size=size,
+                        token_count=tokens,
+                        total_tokens=tokens
+                    )
+                    node.children.append(child)
+        except Exception as e:
+            self.errors.append(f"Error building tree for {path}: {e}")
+    
+    def build_file_tree_string(self) -> str:
         """
         Build a text representation of the repository file tree.
         
