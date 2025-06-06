@@ -1,14 +1,152 @@
 """GitHub repository adapter implementation."""
 import os
+import asyncio
+import aiohttp
+import base64
 from typing import Optional, List, Set, Dict, Tuple
 from github import Github, GithubException
-from github.Repository import Repository as GithubRepo
-from github.ContentFile import ContentFile
 from tqdm import tqdm
+from pathlib import Path
+from dataclasses import dataclass
+
+try:
+    from rich.progress import Progress, TextColumn, BarColumn, TimeElapsedColumn
+    RICH_AVAILABLE = True
+except ImportError:
+    RICH_AVAILABLE = False
 
 from ..core.models import Config, FileNode
 from ..core.file_analyzer import FileAnalyzer
 from .base import RepositoryAdapter
+
+
+@dataclass
+class FileResult:
+    """Clean result container for file processing."""
+    path: str
+    content: Optional[str] = None
+    tokens: int = 0
+    error: Optional[str] = None
+    
+    @property
+    def success(self) -> bool:
+        return self.error is None
+
+
+class AsyncGitHubClient:
+    """Clean async GitHub API client with proper resource management."""
+    
+    def __init__(self, token: str, owner: str, repo: str, branch: str, config: Config):
+        self.token = token
+        self.owner = owner
+        self.repo = repo
+        self.branch = branch
+        self.config = config
+        self.session: Optional[aiohttp.ClientSession] = None
+        self.semaphore = asyncio.Semaphore(20)  # Rate limiting
+        self.file_analyzer = FileAnalyzer(config)
+    
+    async def __aenter__(self):
+        """Async context manager entry with session setup."""
+        headers = {
+            'Authorization': f'token {self.token}',
+            'Accept': 'application/vnd.github.v3+json',
+            'User-Agent': 'repo2txt'
+        }
+        connector = aiohttp.TCPConnector(limit=100, limit_per_host=30)
+        self.session = aiohttp.ClientSession(headers=headers, connector=connector)
+        return self
+    
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Async context manager exit with guaranteed cleanup."""
+        if self.session and not self.session.closed:
+            await self.session.close()
+    
+    async def fetch_file(self, file_path: str) -> FileResult:
+        """Fetch a single file with proper error handling."""
+        async with self.semaphore:
+            try:
+                # Normalize path for GitHub API
+                api_path = file_path.replace('\\', '/')
+                url = f"https://api.github.com/repos/{self.owner}/{self.repo}/contents/{api_path}"
+                
+                params = {}
+                if self.branch:
+                    params['ref'] = self.branch
+                
+                async with self.session.get(url, params=params) as response:
+                    if response.status != 200:
+                        error_text = await response.text()
+                        return FileResult(file_path, error=f"HTTP {response.status}: {error_text}")
+                    
+                    data = await response.json()
+                    
+                    # Validate file type
+                    if data.get('type') != 'file':
+                        return FileResult(file_path, error=f"Not a file: {file_path}")
+                    
+                    # Check file size
+                    file_size = data.get('size', 0)
+                    if file_size > self.config.max_file_size:
+                        return FileResult(file_path, error=f"File too large ({file_size:,} bytes)")
+                    
+                    # Decode content
+                    encoding = data.get('encoding')
+                    if encoding != 'base64':
+                        return FileResult(file_path, error=f"Unsupported encoding: {encoding}")
+                    
+                    content_b64 = data.get('content', '').replace('\n', '')
+                    content_bytes = base64.b64decode(content_b64)
+                    
+                    # Check if binary
+                    if self.file_analyzer.is_binary_file(file_path, content_bytes):
+                        return FileResult(file_path, error="Binary file")
+                    
+                    # Decode as text
+                    for encoding_name in self.config.encoding_fallbacks:
+                        try:
+                            content = content_bytes.decode(encoding_name)
+                            return FileResult(file_path, content=content)
+                        except UnicodeDecodeError:
+                            continue
+                    
+                    return FileResult(file_path, error="Unable to decode file")
+                    
+            except Exception as e:
+                # prevent token exposure
+                safe_error = self._sanitize_error(str(e), [self.token])
+                return FileResult(file_path, error=f"Network error: {safe_error}")
+
+
+async def process_files_batch(
+    github_client: AsyncGitHubClient,
+    file_paths: List[str],
+    enable_token_counting: bool = True,
+    progress_callback=None
+) -> Dict[str, FileResult]:
+    """Process files in batches with clean separation of concerns."""
+    results = {}
+    
+    # Step 1: Fetch all files concurrently
+    tasks = [github_client.fetch_file(path) for path in file_paths]
+    file_results = await asyncio.gather(*tasks, return_exceptions=True)
+    
+    # Step 2: Process results and count tokens
+    for i, result in enumerate(file_results):
+        if isinstance(result, Exception):
+            results[file_paths[i]] = FileResult(file_paths[i], error=str(result))
+        else:
+            # Count tokens if enabled and content exists
+            if enable_token_counting and result.content:
+                result.tokens = github_client.file_analyzer.count_tokens(result.content)
+            
+            results[result.path] = result
+            
+            # Progress callback
+            if progress_callback:
+                progress_callback(i + 1, len(file_paths))
+    
+    return results
 
 
 class GitHubAdapter(RepositoryAdapter):
@@ -44,6 +182,14 @@ class GitHubAdapter(RepositoryAdapter):
         """Allow user to select a branch."""
         try:
             branches = [b.name for b in self.repo.get_branches()]
+            
+            # If there's only one branch, use it automatically
+            if len(branches) == 1:
+                self.branch = branches[0]
+                print(f"|>| Using branch: {self.branch}")
+                return self.branch
+            
+            # Multiple branches - show options and ask user to choose
             print(f"\n|>| Available branches: {', '.join(branches[:10])}")
             if len(branches) > 10:
                 print(f"    ... and {len(branches) - 10} more")
@@ -60,7 +206,8 @@ class GitHubAdapter(RepositoryAdapter):
             return self.branch
             
         except Exception as e:
-            self.errors.append(f"Error fetching branches: {str(e)}")
+            safe_error = self._sanitize_error(str(e), [self.config.github_token])
+            self.errors.append(f"Error fetching branches: {safe_error}")
             return None
     
     def get_readme_content(self) -> str:
@@ -96,7 +243,8 @@ class GitHubAdapter(RepositoryAdapter):
             return items
             
         except Exception as e:
-            self.errors.append(f"Error listing contents of {path}: {str(e)}")
+            safe_error = self._sanitize_error(str(e), [self.config.github_token])
+            self.errors.append(f"Error listing contents of {path}: {safe_error}")
             return []
     
     def traverse_interactive(self) -> Tuple[str, Set[str], Dict[str, int]]:
@@ -364,7 +512,9 @@ class GitHubAdapter(RepositoryAdapter):
         
         try:
             contents = self.repo.get_contents(path, ref=branch)
+            file_paths = []
             
+            # Collect all file paths first
             for content in contents:
                 if content.type == "dir":
                     if content.name not in self.config.excluded_dirs:
@@ -383,14 +533,18 @@ class GitHubAdapter(RepositoryAdapter):
                     if content.encoding == 'none':
                         continue
                     
-                    # Try to decode and count tokens
+                    file_paths.append(content.path)
+            
+            # Use async processing for file content if we have many files
+            if len(file_paths) > 5:
+                # For estimation, just use synchronous processing to keep it simple
+                for file_path in file_paths:
                     try:
-                        file_content = content.decoded_content.decode('utf-8')
+                        content_obj = self.repo.get_contents(file_path, ref=branch)
+                        file_content = content_obj.decoded_content.decode('utf-8')
                         total_tokens += self.file_analyzer.count_tokens(file_content)
                     except:
-                        # Skip files that can't be decoded
                         pass
-                        
         except Exception:
             # Silently handle errors during estimation
             pass
@@ -400,7 +554,9 @@ class GitHubAdapter(RepositoryAdapter):
     def get_file_content(self, file_path: str) -> Tuple[Optional[str], Optional[str]]:
         """Get content of a specific file."""
         try:
-            content_obj = self.repo.get_contents(file_path, ref=self.branch)
+            # Normalize path separators for GitHub API (always use forward slashes)
+            api_path = file_path.replace('\\', '/')
+            content_obj = self.repo.get_contents(api_path, ref=self.branch)
             
             if content_obj.type != 'file':
                 return None, f"Not a file: {file_path}"
@@ -427,21 +583,37 @@ class GitHubAdapter(RepositoryAdapter):
         except Exception as e:
             return None, str(e)
     
-    def _format_file_content(self, file_path: str, content: Optional[str], error: Optional[str]) -> str:
-        """Format file content based on output format setting."""
-        if self.config.output_format == 'xml':
-            if content:
-                return f'<file path="{file_path}">\n{content}\n</file>\n'
-            else:
-                return f'<file path="{file_path}" error="{error}" />\n'
-        else:  # markdown
-            if content:
-                return f'```{file_path}\n{content}\n```\n'
-            else:
-                return f'```{file_path}\n# Error: {error}\n```\n'
+    # Note: _format_file_content is now inherited from base class
     
     def get_file_contents(self, selected_files: List[str]) -> Tuple[str, Dict[str, int]]:
         """Get contents of selected files."""
+        # Try async processing first
+        try:
+            # Simply call async processing directly
+            file_contents_dict, token_data = self._run_async_processing(selected_files)
+            
+            # Format the content
+            file_contents = ""
+            for file_path in selected_files:
+                content = file_contents_dict.get(file_path, f"# Error: File not found")
+                if content.startswith("# Error:"):
+                    file_contents += self._format_file_content(file_path, None, content[8:])
+                else:
+                    file_contents += self._format_file_content(file_path, content, None)
+            
+            return file_contents, token_data
+            
+        except Exception as e:
+            print(f"[!] Async processing failed: {e}, falling back to synchronous processing...")
+            # Fall back to synchronous processing
+            return self._get_file_contents_sync(selected_files)
+
+    def _run_async_processing(self, selected_files: List[str]) -> Tuple[Dict[str, str], Dict[str, int]]:
+        """Simplified async entry point."""
+        return asyncio.run(self._process_files_clean(selected_files))
+
+    def _get_file_contents_sync(self, selected_files: List[str]) -> Tuple[str, Dict[str, int]]:
+        """Synchronous fallback for get_file_contents."""
         file_contents = ""
         token_data = {}
         
@@ -455,14 +627,86 @@ class GitHubAdapter(RepositoryAdapter):
                 
                 if self.config.enable_token_counting:
                     tokens = self.file_analyzer.count_tokens(content)
-                    if tokens > 0:
-                        token_data[file_path] = tokens
+                    # Include all token counts, even 0, so tree display is accurate
+                    token_data[file_path] = tokens
             else:
                 file_contents += self._format_file_content(file_path, None, error)
         
         return file_contents, token_data
     
-    def build_file_tree(self) -> str:
+    def build_file_tree(self) -> FileNode:
+        """
+        Build a hierarchical FileNode tree structure of the repository.
+        
+        Returns:
+            Root FileNode with children representing the file tree structure.
+        """
+        root = FileNode(
+            path="",
+            name=self.repo_name,
+            type='dir'
+        )
+        self._build_tree_recursive("", root, self.branch)
+        
+        # Aggregate total tokens for the root directory
+        root.total_tokens = sum(c.total_tokens for c in root.children)
+        
+        return root
+    
+    def _build_tree_recursive(self, path: str, node: FileNode, branch: Optional[str] = None) -> None:
+        """Recursively build file tree from GitHub API."""
+        try:
+            # Use the instance branch if no branch specified
+            if branch is None:
+                branch = self.branch
+                
+            contents = self.repo.get_contents(path, ref=branch)
+            if not isinstance(contents, list):
+                contents = [contents]
+            
+            for content in contents:
+                # Skip excluded directories
+                if content.type == "dir" and content.name in self.config.excluded_dirs:
+                    continue
+                
+                if content.type == "dir":
+                    child = FileNode(
+                        path=content.path,
+                        name=content.name,
+                        type='dir'
+                    )
+                    node.children.append(child)
+                    self._build_tree_recursive(content.path, child, branch)
+                    
+                    # Calculate total tokens for directory
+                    child.total_tokens = sum(c.total_tokens for c in child.children)
+                else:  # file
+                    # Skip binary files
+                    ext = os.path.splitext(content.name)[1].lower()
+                    if ext in self.config.binary_extensions:
+                        continue
+                    
+                    # Check file size
+                    if content.size and content.size > self.config.max_file_size:
+                        continue
+                    
+                    # Skip token counting during tree building to avoid blocking HTTP requests
+                    # Tree building should be fast - token counting will be done later when files are selected
+                    tokens = 0
+                    
+                    child = FileNode(
+                        path=content.path,
+                        name=content.name,
+                        type='file',
+                        size=content.size,
+                        token_count=tokens,
+                        total_tokens=tokens
+                    )
+                    node.children.append(child)
+        except Exception as e:
+            self.errors.append(f"Error building tree for {path}: {e}")
+    
+    def build_file_tree_string(self) -> str:
         """
         Build a text representation of the repository file tree.
         
@@ -471,32 +715,34 @@ class GitHubAdapter(RepositoryAdapter):
         """
         tree_lines = []
         
-        def _build_tree_recursive(current_path: str, prefix: str = "", is_last: bool = True):
+        def _build_tree_recursive(current_path: str = "", prefix: str = "", is_last: bool = True):
             """Recursively build tree structure."""
             try:
-                items = self.list_contents(current_path)
+                contents = self.repo.get_contents(current_path)
+                if not isinstance(contents, list):
+                    contents = [contents]
+                
                 # Sort directories first, then files, alphabetically
-                dirs = [(name, type_, size) for name, type_, size in items if type_ == 'dir']
-                files = [(name, type_, size) for name, type_, size in items if type_ == 'file']
+                dirs = [c for c in contents if c.type == "dir" and c.name not in self.config.excluded_dirs]
+                files = [c for c in contents if c.type == "file"]
                 
-                all_items = sorted(dirs) + sorted(files)
+                all_items = sorted(dirs, key=lambda x: x.name) + sorted(files, key=lambda x: x.name)
                 
-                for i, (name, type_, size) in enumerate(all_items):
+                for i, content in enumerate(all_items):
                     is_item_last = (i == len(all_items) - 1)
                     connector = "└── " if is_item_last else "├── "
-                    tree_lines.append(f"{prefix}{connector}{name}")
+                    tree_lines.append(f"{prefix}{connector}{content.name}")
                     
-                    if type_ == 'dir':
+                    if content.type == "dir":
                         # Add to tree recursively
                         extension = "    " if is_item_last else "│   "
-                        new_path = os.path.join(current_path, name) if current_path else name
-                        _build_tree_recursive(new_path, prefix + extension, is_item_last)
+                        _build_tree_recursive(content.path, prefix + extension, is_item_last)
                         
             except Exception as e:
                 self.errors.append(f"Error building tree for {current_path}: {str(e)}")
         
         # Start from root
-        _build_tree_recursive("")
+        _build_tree_recursive()
         return "\n".join(tree_lines)
     
     def get_file_list(self) -> List[str]:
@@ -514,7 +760,10 @@ class GitHubAdapter(RepositoryAdapter):
                 items = self.list_contents(current_path)
                 
                 for name, type_, size in items:
-                    item_path = os.path.join(current_path, name) if current_path else name
+                    if current_path:
+                        item_path = f"{current_path}/{name}"  # Always use forward slashes for GitHub
+                    else:
+                        item_path = name
                     
                     if type_ == 'file':
                         file_list.append(item_path)
@@ -556,7 +805,10 @@ class GitHubAdapter(RepositoryAdapter):
                     connector = "└── " if is_item_last else "├── "
                     tree_lines.append(f"{prefix}{connector}{name}")
                     
-                    item_path = os.path.join(current_path, name) if current_path else name
+                    if current_path:
+                        item_path = f"{current_path}/{name}"  # Always use forward slashes for GitHub
+                    else:
+                        item_path = name
                     
                     if type_ == 'dir':
                         # Only recurse into directories that passed the filtering
@@ -575,3 +827,65 @@ class GitHubAdapter(RepositoryAdapter):
         
         tree_string = "\n".join(tree_lines)
         return tree_string, file_paths
+
+    async def _process_files_clean(self, file_paths: List[str]) -> Tuple[Dict[str, str], Dict[str, int]]:
+        """Clean async file processing with proper resource management."""
+        file_contents = {}
+        token_data = {}
+        
+        # Progress tracking setup
+        progress_counter = 0
+        total_files = len(file_paths)
+        
+        def update_progress(completed: int, total: int):
+            nonlocal progress_counter
+            progress_counter = completed
+        
+        async with AsyncGitHubClient(
+            self.config.github_token, 
+            self.owner, 
+            self.repo_name, 
+            self.branch,
+            self.config
+        ) as github_client:
+            
+            # Process with progress tracking
+            if RICH_AVAILABLE:
+                with Progress(
+                    TextColumn("[progress.description]{task.description}"),
+                    BarColumn(),
+                    TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+                    TextColumn("{task.completed}/{task.total}"),
+                    TimeElapsedColumn(),
+                ) as progress:
+                    task = progress.add_task("Processing files", total=total_files)
+                    
+                    def rich_progress(completed, total):
+                        progress.update(task, completed=completed)
+                    
+                    results = await process_files_batch(
+                        github_client, 
+                        file_paths, 
+                        self.config.enable_token_counting,
+                        rich_progress
+                    )
+            else:
+                # Fallback to simple counter
+                results = await process_files_batch(
+                    github_client, 
+                    file_paths, 
+                    self.config.enable_token_counting,
+                    update_progress
+                )
+                print(f"Processed {total_files} files")
+        
+        # Convert results to expected format
+        for path, result in results.items():
+            if result.success:
+                file_contents[path] = result.content
+                token_data[path] = result.tokens
+            else:
+                file_contents[path] = f"# Error: {result.error}"
+                token_data[path] = 0
+        
+        return file_contents, token_data
