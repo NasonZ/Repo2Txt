@@ -215,6 +215,7 @@ class CommandHandler:
             from ..core.analyzer import RepositoryAnalyzer
             from ..core.models import AnalysisResult, FileNode
             from ..adapters import create_adapter
+            from ..utils import FileTreeBuilder
             
             # Check output directory permissions
             try:
@@ -267,21 +268,12 @@ class CommandHandler:
             
             # Create AnalysisResult
             # First, create a simple file tree from selected files
-            root_node = FileNode(
-                path=self.agent.analysis_result.repo_name,
-                name=self.agent.analysis_result.repo_name,
-                type="dir"
+            # Build proper hierarchical tree structure
+            root_node = FileTreeBuilder.from_paths(
+                repo_name=self.agent.analysis_result.repo_name,
+                file_paths=list(self.state_manager.state.selected_files),
+                token_data=file_token_data if include_tokens else None
             )
-            
-            # Add selected files to the tree
-            for file_path in self.state_manager.state.selected_files:
-                file_node = FileNode(
-                    path=file_path,
-                    name=os.path.basename(file_path),
-                    type="file",
-                    token_count=file_token_data.get(file_path, 0) if include_tokens else 0
-                )
-                root_node.children.append(file_node)
             
             result = AnalysisResult(
                 repo_path=str(self.agent.repo_path),

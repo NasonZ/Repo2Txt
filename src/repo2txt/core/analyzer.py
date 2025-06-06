@@ -9,6 +9,7 @@ import re
 from ..core.models import Config, AnalysisResult, FileNode
 from ..core.file_analyzer import FileAnalyzer
 from ..adapters import create_adapter
+from ..utils import FileTreeBuilder, PathUtils
 
 try:
     from rich.progress import Progress, TextColumn, BarColumn, TimeElapsedColumn
@@ -73,47 +74,11 @@ class RepositoryAnalyzer:
         total_files = len(selected_paths)
         
         # Create a proper file tree structure from the selected paths
-        root_node = FileNode(
-            path=repo_name,
-            name=repo_name,
-            type="dir"
+        root_node = FileTreeBuilder.from_paths(
+            repo_name=repo_name,
+            file_paths=selected_paths,
+            token_data=token_data
         )
-        
-        # Build directory structure
-        for file_path in selected_paths:
-            # Split path into components (handle both / and \ separators)
-            parts = file_path.replace('\\', '/').split('/')
-            current_node = root_node
-            
-            # Create directory nodes as needed
-            for i, part in enumerate(parts[:-1]):
-                # Check if this directory already exists
-                found = False
-                for child in current_node.children:
-                    if child.name == part and child.type == "dir":
-                        current_node = child
-                        found = True
-                        break
-                
-                # Create directory node if it doesn't exist
-                if not found:
-                    dir_path = '/'.join(parts[:i+1])
-                    dir_node = FileNode(
-                        path=dir_path,
-                        name=part,
-                        type="dir"
-                    )
-                    current_node.children.append(dir_node)
-                    current_node = dir_node
-            
-            # Add the file node
-            file_node = FileNode(
-                path=file_path,
-                name=parts[-1],  # Just the filename
-                type="file",
-                token_count=token_data.get(file_path, 0)
-            )
-            current_node.children.append(file_node)
         
         # Prepare data for AnalysisResult creation
         total_tokens_calc = sum(token_data.values()) if self.config.enable_token_counting else 0
@@ -247,11 +212,11 @@ Please analyze this repository to understand its structure, purpose, and functio
         dir_totals = {}
         
         for file_path, tokens in token_data.items():
-            parts = file_path.split(os.sep)
+            parts = PathUtils.normalize_and_split(file_path)
             
             # Track all directory paths and their totals
             for i in range(len(parts)):
-                dir_path = os.sep.join(parts[:i+1])
+                dir_path = PathUtils.join_path_components(parts[:i+1])
                 if i < len(parts) - 1:  # It's a directory
                     if dir_path not in dir_totals:
                         dir_totals[dir_path] = {"tokens": 0, "files": 0}
