@@ -72,23 +72,48 @@ class RepositoryAnalyzer:
         total_tokens = sum(token_data.values())
         total_files = len(selected_paths)
         
-        # Create a simple file tree from the structure string and file paths
-        # For now, create a minimal tree structure - this can be enhanced later
+        # Create a proper file tree structure from the selected paths
         root_node = FileNode(
             path=repo_name,
             name=repo_name,
             type="dir"
         )
         
-        # Create file nodes for each selected path
+        # Build directory structure
         for file_path in selected_paths:
+            # Split path into components (handle both / and \ separators)
+            parts = file_path.replace('\\', '/').split('/')
+            current_node = root_node
+            
+            # Create directory nodes as needed
+            for i, part in enumerate(parts[:-1]):
+                # Check if this directory already exists
+                found = False
+                for child in current_node.children:
+                    if child.name == part and child.type == "dir":
+                        current_node = child
+                        found = True
+                        break
+                
+                # Create directory node if it doesn't exist
+                if not found:
+                    dir_path = '/'.join(parts[:i+1])
+                    dir_node = FileNode(
+                        path=dir_path,
+                        name=part,
+                        type="dir"
+                    )
+                    current_node.children.append(dir_node)
+                    current_node = dir_node
+            
+            # Add the file node
             file_node = FileNode(
                 path=file_path,
-                name=os.path.basename(file_path),
+                name=parts[-1],  # Just the filename
                 type="file",
                 token_count=token_data.get(file_path, 0)
             )
-            root_node.children.append(file_node)
+            current_node.children.append(file_node)
         
         # Prepare data for AnalysisResult creation
         total_tokens_calc = sum(token_data.values()) if self.config.enable_token_counting else 0
