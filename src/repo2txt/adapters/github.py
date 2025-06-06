@@ -53,7 +53,10 @@ class AsyncGitHubClient:
             'Accept': 'application/vnd.github.v3+json',
             'User-Agent': 'repo2txt'
         }
-        connector = aiohttp.TCPConnector(limit=100, limit_per_host=30)
+        connector = aiohttp.TCPConnector(
+            limit=config.connection_limit, 
+            limit_per_host=config.connection_limit_per_host
+        )
         self.session = aiohttp.ClientSession(headers=headers, connector=connector)
         return self
     
@@ -221,7 +224,8 @@ class GitHubAdapter(RepositoryAdapter):
             try:
                 readme = self.repo.get_contents(readme_name, ref=self.branch)
                 return readme.decoded_content.decode('utf-8')
-            except:
+            except Exception:
+                # README file not found or inaccessible, try next one
                 continue
         
         return "README not found."
@@ -564,8 +568,9 @@ class GitHubAdapter(RepositoryAdapter):
                         content_obj = self.repo.get_contents(file_path, ref=branch)
                         file_content = content_obj.decoded_content.decode('utf-8')
                         total_tokens += self.file_analyzer.count_tokens(file_content)
-                    except:
-                        pass
+                    except Exception:
+                        # File inaccessible or binary, skip for estimation
+                        continue
         except Exception:
             # Silently handle errors during estimation
             pass
@@ -776,7 +781,7 @@ class GitHubAdapter(RepositoryAdapter):
                     file_content = content_obj.decoded_content.decode('utf-8')
                     node.token_count = self.file_analyzer.count_tokens(file_content)
                     node.total_tokens = node.token_count
-            except:
+            except Exception:
                 node.token_count = 0
                 node.total_tokens = 0
             
@@ -799,7 +804,7 @@ class GitHubAdapter(RepositoryAdapter):
                     file_content = content_obj.decoded_content.decode('utf-8')
                     node.token_count = self.file_analyzer.count_tokens(file_content)
                     node.total_tokens = node.token_count
-            except:
+            except Exception:
                 node.token_count = 0
                 node.total_tokens = 0
         else:

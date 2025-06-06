@@ -60,8 +60,8 @@ class FileAnalyzer:
         
         # If we have content, check for binary data first (more reliable than mimetypes)
         if content:
-            # Check for null bytes in first 8192 bytes
-            sample = content[:8192]
+            # Check for null bytes in first N bytes (configurable)
+            sample = content[:self.config.binary_sample_size]
             if b'\x00' in sample:
                 return True
             

@@ -71,6 +71,11 @@ class Config:
     max_files: int = 5000  # Maximum files per repository
     max_total_size: int = 1024 * 1024 * 1024  # 1GB total size limit
     
+    # Network/Performance settings
+    connection_limit: int = 100  # HTTP connection pool limit
+    connection_limit_per_host: int = 30  # Connections per host
+    binary_sample_size: int = 8192  # Bytes to sample for binary detection
+    
     # AI Selection settings
     ai_select: bool = False  # Enable AI-assisted file selection
     ai_query: Optional[str] = None  # Query for AI file selection

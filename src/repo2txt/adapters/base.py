@@ -190,7 +190,9 @@ class RepositoryAdapter(ABC):
             self.total_size_processed += size
             if self.total_size_processed > self.max_total_size:
                 return 0
-        except:
+        except Exception as e:
+            # Size calculation failed, continue with token counting
+            # This is not critical - just resource tracking
             pass
         
         return self.file_analyzer.count_tokens(content)

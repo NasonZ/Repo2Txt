@@ -523,7 +523,8 @@ class LocalAdapter(RepositoryAdapter):
                         size = os.path.getsize(item_path)
                         if size > self.config.max_file_size:
                             continue
-                    except:
+                    except Exception:
+                        # File inaccessible (permissions, etc), skip it
                         continue
                     
                     # Count tokens if enabled
