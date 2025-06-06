@@ -25,6 +25,12 @@ class RepositoryAdapter(ABC):
         self.config = config
         self.file_analyzer = FileAnalyzer(config)
         self.errors = []
+        
+        # Resource protection limits
+        self.max_files = config.max_files
+        self.max_total_size = config.max_total_size
+        self.total_size_processed = 0
+        self.files_processed = 0
     
     @abstractmethod
     def get_name(self) -> str:
@@ -88,12 +94,12 @@ class RepositoryAdapter(ABC):
         pass
     
     @abstractmethod
-    def build_file_tree(self) -> str:
+    def build_file_tree(self) -> FileNode:
         """
-        Build a text representation of the repository file tree.
+        Build a hierarchical tree structure of the repository.
         
         Returns:
-            String representation of the file tree structure.
+            Root FileNode with children representing the file tree structure.
         """
         pass
     
@@ -112,15 +118,79 @@ class RepositoryAdapter(ABC):
         if not range_str.strip():
             return []
         
+        # resource protection limits
+        if len(range_str) > 1000:
+            self.errors.append("Range string too long (max 1000 chars)")
+            return []
+        
         ranges = []
         try:
-            for part in range_str.split(','):
+            for part in range_str.split(',')[:100]: 
                 part = part.strip()
                 if '-' in part:
-                    start, end = map(int, part.split('-'))
-                    ranges.extend(range(start, end + 1))
+                    parts = part.split('-', 1)  # Only split once
+                    if len(parts) == 2:
+                        start, end = map(int, parts)
+                        # check ranges
+                        if 0 <= start <= 10000 and 0 <= end <= 10000 and start <= end:
+                            #  prevent memory exhaustion
+                            ranges.extend(range(start, min(end + 1, start + 1000)))
                 else:
-                    ranges.append(int(part))
-            return sorted(set(ranges))  # Remove duplicates and sort
-        except ValueError:
+                    num = int(part)
+                    if 0 <= num <= 10000:  # Reasonable bounds
+                        ranges.append(num)
+            return sorted(set(ranges))[:1000]  # restrict final result size
+        except (ValueError, OverflowError):
             return []
+    
+    def _format_file_content(self, file_path: str, content: Optional[str], error: Optional[str]) -> str:
+        """Format file content based on output format setting. Shared by all adapters."""
+        if self.config.output_format == 'xml':
+            if content:
+                return f'<file path="{file_path}">\n{content}\n</file>\n'
+            else:
+                return f'<file path="{file_path}" error="{error}" />\n'
+        else:  # markdown
+            if content:
+                return f'```{file_path}\n{content}\n```\n'
+            else:
+                return f'```{file_path}\n# Error: {error}\n```\n'
+    
+    def _sanitize_error(self, error: str, sensitive_data: Optional[List[str]] = None) -> str:
+        """Remove sensitive data from error messages. Used by all adapters."""
+        if not sensitive_data:
+            return error
+        
+        sanitized = error
+        for sensitive in sensitive_data:
+            if sensitive:
+                sanitized = sanitized.replace(str(sensitive), "[REDACTED]")
+        return sanitized
+    
+    def _count_tokens_safe(self, file_path: str, content: str = None) -> int:
+        """Safe token counting with resource tracking. Used by all adapters."""
+        if not self.config.enable_token_counting:
+            return 0
+        
+        # Check resource limits
+        if self.files_processed >= self.max_files:
+            return 0
+        
+        if content is None:
+            # Try to get content
+            content_result, error = self.get_file_content(file_path) 
+            if not content_result:
+                return 0
+            content = content_result
+        
+        # Track resources
+        self.files_processed += 1
+        try:
+            size = len(content.encode('utf-8'))
+            self.total_size_processed += size
+            if self.total_size_processed > self.max_total_size:
+                return 0
+        except:
+            pass
+        
+        return self.file_analyzer.count_tokens(content)
