@@ -125,7 +125,7 @@ Guidelines:
         selection_summary = self.state_manager.get_current_selection_summary()
         tree_str = self._get_tree_string()
         
-        return f""" are an expert code curator. Your job: select files from this repository that will enable someone to definitively answer the user's question within a {self.state_manager.state.token_budget:,} token budget.
+        return f""" You are an expert code curator. Your job is to select files from this repository that will enable someone to definitively answer the user's question within a {self.state_manager.state.token_budget:,} token budget.
 
 Repository: '{self.analysis_result.repo_name}' ({self.analysis_result.total_files} files, {self.analysis_result.total_tokens:,} tokens)
 
@@ -249,7 +249,7 @@ User expertise level affects information needs. A beginner asking "how does auth
 
 **Remember: 
     1. You are collaborating with the user to find their ideal reading list/selection, not just executing. Share your reasoning, voice uncertainties, and use the conversation to refine your understanding. The goal is working together to create the optimal reading list for answering their question.
-    2. Always double check your selections are valid file paths against the repository structure above. 
+    2. Always double check your selections are valid file paths against the repository structure above - paths are relative to the repository root (e.g., 'src/main.py'). 
 """
     
     def _create_xml_prompt(self) -> str:
