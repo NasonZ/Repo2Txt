@@ -93,6 +93,20 @@ python -m build            # Build distribution packages
 - **Line length**: 100 characters (Black + Ruff configured)
 - **Python versions**: 3.9+ (primary target: 3.11+)
 
+### Adapter Implementation Notes
+
+**Critical Architecture Guidance**: The LocalAdapter and GitHubAdapter implementations appear similar but have fundamentally different internal architectures:
+
+- **LocalAdapter**: Real-time I/O strategy (filesystem access, on-demand token counting)
+- **GitHubAdapter**: Pre-cached API strategy (memory-based, pre-computed tokens)
+
+**⚠️ Do not attempt to consolidate `traverse_interactive()` implementations** despite UI similarity. These differences exist due to:
+- API constraints vs filesystem access patterns
+- Network latency vs direct I/O characteristics  
+- Rate limiting vs unlimited filesystem operations
+
+For detailed technical comparison, see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#repository-adapter-implementations).
+
 ## AI System Architecture
 
 ### Core AI Components

@@ -138,6 +138,45 @@ Users need immediate feedback about token budget usage. Both manual and AI workf
 | New LLM provider | `ai/llm.py` client abstraction |
 | New validation rules | `ai/state.py` validation methods |
 
+## Repository Adapter Implementations
+
+While all adapters provide consistent interfaces and user experiences, their internal implementations differ significantly due to data source characteristics:
+
+### Interactive Traversal Architecture Differences
+
+**LocalAdapter (Real-time I/O Strategy)**
+- **Data Source**: Direct filesystem access via `os.listdir(full_path)`
+- **Token Counting**: Real-time computation via `file_analyzer.read_file_content() + count_tokens()`
+- **Path Handling**: Filesystem manipulation using `os.path.relpath(item_path, self.repo_path)`
+- **Item Processing**: Creates simple tuples `(item, 'dir'/'file')` from filesystem scan
+- **Performance Profile**: I/O bound - reads files on demand during navigation
+- **Memory Usage**: Low - processes individual files as user navigates
+
+**GitHubAdapter (Pre-cached API Strategy)**
+- **Data Source**: Pre-built tree via `_cached_file_tree + _path_to_node` lookup table
+- **Token Counting**: Uses pre-computed `content.total_tokens` from initial API scan
+- **Path Handling**: Direct use of `content.path` from GitHub API responses
+- **Item Processing**: Creates `CachedContent` objects from `FileNode` children
+- **Performance Profile**: Memory bound - entire repository structure loaded upfront
+- **Memory Usage**: Higher - full repository tree cached in memory
+
+### Why These Differences Exist
+
+1. **API Constraints**: GitHub API requires batch operations for efficiency, while filesystem allows granular access
+2. **Network Latency**: Pre-caching minimizes API calls during user interaction
+3. **Rate Limiting**: GitHub API limits necessitate upfront bulk operations
+4. **Data Availability**: Filesystem provides immediate access, API requires structured requests
+
+### Implementation Consolidation Risk
+
+**Note**: Despite identical user interfaces (`traverse_interactive()` methods), these implementations cannot be safely consolidated due to:
+
+- **Fundamental data source differences** (filesystem vs API cache)
+- **Token counting strategies** (real-time vs pre-computed)
+- **Path manipulation approaches** (OS-specific vs API-normalized)
+- **Performance characteristics** (I/O bound vs memory bound)
+
+
 ## Performance Characteristics
 
 - **Token counting**: Cached per file content hash for efficiency

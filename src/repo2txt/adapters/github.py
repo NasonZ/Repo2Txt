@@ -54,8 +54,8 @@ class AsyncGitHubClient:
             'User-Agent': 'repo2txt'
         }
         connector = aiohttp.TCPConnector(
-            limit=config.connection_limit, 
-            limit_per_host=config.connection_limit_per_host
+            limit=self.config.connection_limit, 
+            limit_per_host=self.config.connection_limit_per_host
         )
         self.session = aiohttp.ClientSession(headers=headers, connector=connector)
         return self
