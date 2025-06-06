@@ -67,7 +67,6 @@ class AgentSession:
         # UI console
         self.ui = ChatConsole(
             theme=config.theme, 
-            repo_root=config.repo_path, 
             debug_mode=config.debug_mode
         )
         

@@ -72,7 +72,7 @@ class FileSelectorAgent:
         # Analyze repository if needed
         if not self.analysis_result:
             # Create temporary UI for analysis
-            self.ui = ChatConsole(theme=theme, repo_root=repo_path_obj, debug_mode=debug_mode)
+            self.ui = ChatConsole(theme=theme, debug_mode=debug_mode)
             self._analyze_repository()
             
         # Initialize session with analysis result

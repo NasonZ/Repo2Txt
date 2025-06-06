@@ -154,7 +154,7 @@ class ChatOrchestrator:
             response_content = msg.content or ""
             
             # Display non-streaming response
-            self.ui.print(f"\n[{self.ui.colors['accent']}][<] [/{self.ui.colors['accent']}] {self.ui._sanitize_content(response_content)}")
+            self.ui.print(f"\n[{self.ui.colors['accent']}][<] [/{self.ui.colors['accent']}] {response_content}")
             
             # Parse tool calls
             tool_calls = parse_openai_tool_calls(msg.tool_calls)
@@ -232,7 +232,7 @@ class ChatOrchestrator:
         else:
             final_completion = self.llm_client.create_completion(final_messages, stream=False)
             final_response_content = final_completion.choices[0].message.content or ""
-            self.ui.print(f"\n[{self.ui.colors['accent']}][<] [/{self.ui.colors['accent']}] {self.ui._sanitize_content(final_response_content)}")
+            self.ui.print(f"\n[{self.ui.colors['accent']}][<] [/{self.ui.colors['accent']}] {final_response_content}")
             
         return final_response_content
     

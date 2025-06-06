@@ -36,23 +36,54 @@ class PromptGenerator:
         else:
             return self._create_standard_prompt()
     
-    def _format_file_tree(self, node: FileNode, prefix: str = "", is_last: bool = True) -> str:
-        """Format file tree for display."""
+    def _format_file_tree(self, node: FileNode, prefix: str = "", is_last: bool = True, use_simple_format: bool = False) -> str:
+        """Format file tree for display.
+        
+        Args:
+            node: The FileNode to format
+            prefix: Current indentation prefix
+            is_last: Whether this is the last child at its level
+            use_simple_format: If True, uses simple indentation (for token-constrained scenarios) # TODO: Make this an accessible parameter
+        """
         if not node:
             return ""
         
+        # Tree connectors are preferred for LLM comprehension (more training data, clearer structure)
+        if use_simple_format:
+            return self._format_tree_simple(node, 0)
+        else:
+            # Simple format available for token-constrained scenarios
+            return self._format_tree_connectors(node, prefix, is_last)
+    
+    def _format_tree_simple(self, node: FileNode, indent: int = 0) -> str:
+        """Format file tree with simple indentation (for token-constrained scenarios)."""
+        lines = []
+        prefix = "  " * indent
+        
+        if node.is_dir:
+            lines.append(f"{prefix}▸ {node.name}/ (~{node.total_tokens:,} tokens)")
+            for child in sorted(node.children, key=lambda x: (not x.is_dir, x.name)):
+                lines.append(self._format_tree_simple(child, indent + 1))
+        else:
+            token_str = f"~{node.token_count:,} tokens" if node.token_count else "0 tokens"
+            lines.append(f"{prefix}{node.name} ({token_str})")
+        
+        return '\n'.join(filter(None, lines))
+    
+    def _format_tree_connectors(self, node: FileNode, prefix: str = "", is_last: bool = True) -> str:
+        """Format file tree with connectors (default - better for LLM comprehension)."""
         lines = []
         connector = "└── " if is_last else "├── "
         
         if node.is_dir:
-            lines.append(f"{prefix}{connector}📁 {node.name}/ (~{node.total_tokens:,} tokens)")
+            lines.append(f"{prefix}{connector}▸ {node.name}/ (~{node.total_tokens:,} tokens)")
             extension = "    " if is_last else "│   "
             for i, child in enumerate(node.children):
                 is_last_child = i == len(node.children) - 1
-                lines.append(self._format_file_tree(child, prefix + extension, is_last_child))
+                lines.append(self._format_tree_connectors(child, prefix + extension, is_last_child))
         else:
             token_str = f"~{node.token_count:,} tokens" if node.token_count else "0 tokens"
-            lines.append(f"{prefix}{connector}📄 {node.name} ({token_str})")
+            lines.append(f"{prefix}{connector}{node.name} ({token_str})")
         
         return "\n".join(lines)
     
@@ -70,7 +101,7 @@ class PromptGenerator:
         
         return f"""You are an AI assistant helping a user select files from the repository '{self.analysis_result.repo_name}'.
 The repository contains {self.analysis_result.total_files} files with {self.analysis_result.total_tokens:,} total tokens.
-Your goal is to help the user pick a set of files relevant to their task, within a budget of {self.state_manager.state.token_budget:,} tokens.
+Your goal is to help the user produce a reading list of files relevant to their task, within a budget of {self.state_manager.state.token_budget:,} tokens.
 
 {selection_summary}
 
@@ -217,7 +248,7 @@ User expertise level affects information needs. A beginner asking "how does auth
 - `adjust_selection`: Refine selection based on user feedback
 
 **Remember: 
-    1. You are collaborating, not just executing. Share your reasoning, voice uncertainties, and use the conversation to refine your understanding. The goal is working together to create the optimal reading list for answering their question.
+    1. You are collaborating with the user to find their ideal reading list/selection, not just executing. Share your reasoning, voice uncertainties, and use the conversation to refine your understanding. The goal is working together to create the optimal reading list for answering their question.
     2. Always double check your selections are valid file paths against the repository structure above. 
 """
     

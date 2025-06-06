@@ -213,12 +213,12 @@ class CommandHandler:
         try:
             # Import required modules
             from ..core.analyzer import RepositoryAnalyzer
-            from ..core.models import AnalysisResult
+            from ..core.models import AnalysisResult, FileNode
             from ..adapters import create_adapter
             
             # Check output directory permissions
             try:
-                test_dir = os.path.join(output_dir, f".test_{datetime.now().strftime('%s')}")
+                test_dir = os.path.join(output_dir, f".test_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
                 os.makedirs(test_dir, exist_ok=True)
                 os.rmdir(test_dir)
             except PermissionError:
@@ -266,25 +266,39 @@ class CommandHandler:
             file_contents = "".join(file_contents_list)
             
             # Create AnalysisResult
+            # First, create a simple file tree from selected files
+            root_node = FileNode(
+                path=self.agent.analysis_result.repo_name,
+                name=self.agent.analysis_result.repo_name,
+                type="dir"
+            )
+            
+            # Add selected files to the tree
+            for file_path in self.state_manager.state.selected_files:
+                file_node = FileNode(
+                    path=file_path,
+                    name=os.path.basename(file_path),
+                    type="file",
+                    token_count=file_token_data.get(file_path, 0) if include_tokens else 0
+                )
+                root_node.children.append(file_node)
+            
             result = AnalysisResult(
+                repo_path=str(self.agent.repo_path),
                 repo_name=self.agent.analysis_result.repo_name,
+                file_tree=root_node,
+                file_paths=self.state_manager.state.selected_files,
+                total_files=len(self.state_manager.state.selected_files),
                 branch=getattr(self.agent.analysis_result, 'branch', None),
                 readme_content=self.agent.analysis_result.readme_content,
-                structure="",  # We'll use the file tree from analysis_result
                 file_contents=file_contents,
                 token_data=file_token_data if include_tokens else {},
                 total_tokens=self.state_manager.state.total_tokens_selected if include_tokens else 0,
-                total_files=len(self.state_manager.state.selected_files),
                 errors=[]
             )
             
-            # Generate the tree structure for selected files only
-            if hasattr(self.agent.analysis_result, 'file_tree'):
-                if isinstance(self.agent.analysis_result.file_tree, str):
-                    result.structure = self.agent.analysis_result.file_tree
-                else:
-                    # Import the prompt generator's format method
-                    result.structure = self.prompt_generator._format_file_tree(self.agent.analysis_result.file_tree)
+            # Generate the tree structure for selected files only - 
+            # The AnalysisResult.structure property will automatically generate from file_tree
             
             # Save results based on requested format(s)
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")

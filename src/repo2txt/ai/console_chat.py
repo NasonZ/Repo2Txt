@@ -29,21 +29,17 @@ class ChatConsole(ConsoleBase):
     debug panels, tool call visualization, and state diff display.
     """
     
-    def __init__(self, theme: str = "green", repo_root: Optional[Path] = None, 
-                 debug_mode: bool = False, file: Optional[Any] = None,
-                 force_plain: bool = False):
+    def __init__(self, theme: str = "green", debug_mode: bool = False, 
+                 file: Optional[Any] = None, force_plain: bool = False):
         """Initialize chat console.
         
         Args:
             theme: Theme name from THEMES
-            repo_root: Repository root for path sanitization
             debug_mode: Enable debug output (tool calls, system prompts, etc.)
             file: Output file (defaults to sys.stdout)
             force_plain: Force plain output even if Rich is available
         """
-        # Always enable path sanitization for chat
-        super().__init__(theme=theme, file=file, force_plain=force_plain,
-                        sanitize_paths=True, repo_root=repo_root)
+        super().__init__(theme=theme, file=file, force_plain=force_plain)
         
         self.theme = theme  # Store theme for RepositoryAnalyzer
         self.debug_mode = debug_mode
@@ -83,7 +79,6 @@ class ChatConsole(ConsoleBase):
     def print_section(self, title: str, content: Any = ""):
         """Print a content section with a titled panel."""
         text_content = content if isinstance(content, (str, Text)) else str(content)
-        text_content = self._sanitize_content(text_content)
         
         if len(text_content) > 2000:
             text_content = text_content[:2000] + "\n... [Section Content Truncated]"
@@ -110,7 +105,7 @@ class ChatConsole(ConsoleBase):
         
         if self.use_rich:
             panel = Panel(
-                self._sanitize_content(display_prompt),
+                display_prompt,
                 title=f"[{self.theme_colors.debug}]🔍 SYSTEM PROMPT (DEBUG)[/{self.theme_colors.debug}]",
                 border_style=self.theme_colors.debug,
                 padding=(1, 2)
@@ -237,7 +232,7 @@ class ChatConsole(ConsoleBase):
             
             for key, value in tool_call.input.items():
                 val_str = json.dumps(value, indent=2) if isinstance(value, (list, dict)) else str(value)
-                table.add_row(f"{key}:", self._sanitize_content(val_str))
+                table.add_row(f"{key}:", val_str)
             
             panel = Panel(
                 table, 
@@ -266,7 +261,6 @@ class ChatConsole(ConsoleBase):
             style = self.theme_colors.success
             title = "✅ TOOL RESULT (DEBUG)"
             content_text = json.dumps(result.output, indent=2) if result.is_json_output else str(result.output)
-            content_text = self._sanitize_content(content_text)
         
         if len(content_text) > 2500:
             content_text = content_text[:2500] + "\n... [Result Truncated]"
@@ -288,18 +282,20 @@ class ChatConsole(ConsoleBase):
         if not self.debug_mode:
             return
         
-        message = self._sanitize_content(message)
         if self.use_rich:
             self.console.print(f"[{self.theme_colors.debug}]🔍 DEBUG: {message}[/{self.theme_colors.debug}]")
         else:
             print(f"🔍 DEBUG: {message}", file=self.file)
     
     def print_streaming_delta(self, delta: str, is_tool_call: bool = False):
-        """Print streaming content from AI responses."""
-        delta = self._sanitize_content(delta)
+        """Print streaming content delta with appropriate styling."""
+        if is_tool_call:
+            # Show tool calls with different styling
+            color = self.theme_colors.warning
+        else:
+            color = self.theme_colors.text
         
         if self.use_rich:
-            style = self.theme_colors.warning if is_tool_call else self.theme_colors.text
-            self.console.print(delta, style=style, end="")
+            self.console.print(delta, style=color, end="")
         else:
             print(delta, end="", file=self.file)
