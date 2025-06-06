@@ -123,3 +123,101 @@ class TestLocalAdapter:
         adapter = LocalAdapter(".", Config())
         assert adapter.parse_range("invalid") == []
         assert adapter.parse_range("") == []
+
+
+class TestEssentialSecurity:
+    """Essential security tests focused on real threats for file processing tools."""
+    
+    @pytest.fixture
+    def secure_repo(self, tmp_path):
+        """Create a test repo with security scenarios."""
+        # Normal files
+        (tmp_path / "safe.txt").write_text("safe content")
+        (tmp_path / "subdir").mkdir()
+        (tmp_path / "subdir" / "file.py").write_text("print('hello')")
+        
+        # Create a file outside repo for path traversal tests
+        outside_dir = tmp_path.parent / "outside"
+        outside_dir.mkdir(exist_ok=True)
+        (outside_dir / "secret.txt").write_text("sensitive data")
+        
+        return tmp_path
+    
+    def test_path_traversal_blocked(self, secure_repo):
+        """CRITICAL: Test path traversal attack prevention."""
+        adapter = LocalAdapter(str(secure_repo), Config())
+        
+        # Real path traversal attack vectors
+        dangerous_paths = [
+            "../secret.txt",           # Basic traversal
+            "../../etc/passwd",        # Deep traversal (Unix)
+            "../outside/secret.txt",   # Escape to sibling directory
+            "subdir/../../secret.txt", # Traversal from subdirectory
+        ]
+        
+        for path in dangerous_paths:
+            content, error = adapter.get_file_content(path)
+            assert content is None, f"Path traversal attack succeeded for: {path}"
+            assert "Invalid path" in error or "Path traversal" in error
+    
+    def test_symlinks_not_followed_outside_repo(self, secure_repo):
+        """CRITICAL: Test symlink escape prevention."""
+        adapter = LocalAdapter(str(secure_repo), Config())
+        
+        # Create a symlink pointing outside repo
+        try:
+            symlink_path = secure_repo / "bad_symlink"
+            target = secure_repo.parent / "outside" / "secret.txt"
+            symlink_path.symlink_to(target)
+            
+            # Symlinks should be skipped in directory listings
+            contents = adapter.list_contents()
+            file_names = [item[0] for item in contents]
+            assert "bad_symlink" not in file_names, "Dangerous symlink was not filtered out"
+            
+        except OSError:
+            # Skip test on systems that don't support symlinks
+            pytest.skip("Symlinks not supported on this system")
+    
+    def test_file_count_limits_enforced(self, tmp_path):
+        """IMPORTANT: Test max files protection against DoS."""
+        large_repo = tmp_path / "large_repo"
+        large_repo.mkdir()
+        (large_repo / "file.txt").write_text("content")
+        
+        # Mock os.walk to simulate repo with too many files
+        def mock_walk(path):
+            # Simulate 2000 files to exceed the 1000 limit
+            for i in range(2000):
+                yield str(large_repo), [], [f"file_{i}.txt"]
+        
+        with patch('os.walk', mock_walk):
+            with pytest.raises(ValueError, match="too many files"):
+                LocalAdapter(str(large_repo), Config())
+    
+    def test_total_size_limits_enforced(self, secure_repo):
+        """IMPORTANT: Test max total size protection."""
+        adapter = LocalAdapter(str(secure_repo), Config())
+        
+        # Verify resource limits are initialized correctly
+        assert adapter.max_files == 1000
+        assert adapter.max_total_size == 1 * 1024 * 1024 * 1024  # 1GB
+        
+        # Test file size tracking during operations
+        initial_size = adapter.total_size_processed
+        content, error = adapter.get_file_content("safe.txt")
+        assert content is not None
+        assert adapter.total_size_processed > initial_size
+    
+    def test_binary_files_detected(self, secure_repo):
+        """IMPORTANT: Test binary detection prevents content injection."""
+        # Create a file with null bytes (binary indicator)
+        binary_file = secure_repo / "binary.txt"
+        binary_file.write_bytes(b'text content\x00with null bytes')
+        
+        adapter = LocalAdapter(str(secure_repo), Config())
+        content, error = adapter.get_file_content("binary.txt")
+        
+        # Should be detected as binary due to null bytes
+        assert content is None, "Binary file with null bytes was not detected"
+        assert error == "Binary file" or "binary" in error.lower()

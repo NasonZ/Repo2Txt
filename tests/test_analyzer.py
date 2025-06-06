@@ -13,15 +13,31 @@ class TestRepositoryAnalyzer:
 
     @pytest.fixture
     def sample_result(self):
+        # Create file tree structure
+        root_node = FileNode(path="test-repo", name="test-repo", type="dir")
+        
+        # Create src directory
+        src_dir = FileNode(path="src", name="src", type="dir")
+        main_file = FileNode(path="src/main.py", name="main.py", type="file", token_count=10)
+        src_dir.children.append(main_file)
+        
+        # Create README file
+        readme_file = FileNode(path="README.md", name="README.md", type="file", token_count=5)
+        
+        # Add to root
+        root_node.children = [src_dir, readme_file]
+        
         return AnalysisResult(
+            repo_path="/path/to/test-repo",
             repo_name="test-repo",
+            file_tree=root_node,
+            file_paths=["src/main.py", "README.md"],
+            total_files=2,
             branch="main",
             readme_content="# Test Repo",
-            structure="src/\n  main.py\nREADME.md",
             file_contents="## src/main.py\n```python\ndef main():\n    pass\n```\n\n## README.md\n```markdown\n# Test Repo\n```",
             token_data={"src/main.py": 10, "README.md": 5},
             total_tokens=15,
-            total_files=2,
             errors=["Some error occurred"]
         )
 

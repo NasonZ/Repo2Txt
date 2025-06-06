@@ -74,3 +74,38 @@ class TestFileAnalyzer:
         
         result = analyzer.count_tokens("test content")
         assert result == 0
+
+
+class TestFileAnalyzerSecurity:
+    """Essential security tests for FileAnalyzer - real threats only."""
+    
+    @pytest.fixture
+    def analyzer(self):
+        config = Config()
+        return FileAnalyzer(config)
+    
+    def test_large_file_protection(self, analyzer):
+        """CRITICAL: Test protection against DoS via huge files."""
+        with patch('os.path.getsize', return_value=10 * 1024 * 1024 * 1024):  # 10GB
+            content, error = analyzer.read_file_content("/path/to/huge.txt")
+            assert content is None, "Huge file was not blocked"
+            assert "File too large" in error
+    
+    def test_null_byte_detection(self, analyzer):
+        """IMPORTANT: Test null byte detection prevents content injection."""
+        with patch('os.path.getsize', return_value=100):
+            # Content with null bytes should be detected as binary
+            with patch('builtins.open', mock_open(read_data=b'content\x00injection')):
+                content, error = analyzer.read_file_content("/path/to/file.txt")
+                
+                # Should detect as binary due to null bytes
+                assert content is None, "File with null bytes was not detected as binary"
+                assert error == "Binary file"
+    
+    def test_binary_content_detection(self, analyzer):
+        """IMPORTANT: Test binary detection prevents malicious content parsing."""
+        # File that looks like text but has binary markers
+        malicious_content = b'#!/bin/bash\necho "hello"\x00\xff\xfe'
+        
+        is_binary = analyzer.is_binary_file("/path/to/script.sh", malicious_content)
+        assert is_binary is True, "Malicious binary content was not detected"

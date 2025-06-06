@@ -63,58 +63,83 @@ class TestFileNode:
 
 class TestAnalysisResult:
     def test_empty_result(self):
+        # Create a minimal file tree for testing
+        root_node = FileNode(
+            path="test-repo",
+            name="test-repo", 
+            type="dir"
+        )
+        
         result = AnalysisResult(
+            repo_path="/path/to/test-repo",
             repo_name="test-repo",
+            file_tree=root_node,
+            file_paths=[],
+            total_files=0,
             branch=None,
             readme_content="",
-            structure="",
             file_contents="",
             token_data={},
             total_tokens=0,
-            total_files=0,
             errors=[]
         )
         assert result.repo_name == "test-repo"
+        assert result.repo_path == "/path/to/test-repo"
         assert result.branch is None
         assert result.errors == []
         assert result.total_tokens == 0
         assert result.total_files == 0
         assert result.has_errors() is False
+        assert result.structure == "└── test-repo"  # Test computed property
 
     def test_result_with_data(self):
+        # Create file tree with some files
+        root_node = FileNode(path="test-repo", name="test-repo", type="dir")
+        file_a = FileNode(path="a.py", name="a.py", type="file", token_count=10)
+        file_b = FileNode(path="b.py", name="b.py", type="file", token_count=15) 
+        file_c = FileNode(path="c.txt", name="c.txt", type="file", token_count=5)
+        root_node.children = [file_a, file_b, file_c]
+        
         token_data = {
             "a.py": 10,
             "b.py": 15,
             "c.txt": 5
         }
+        
         result = AnalysisResult(
+            repo_path="/path/to/test-repo",
             repo_name="test-repo",
+            file_tree=root_node,
+            file_paths=["a.py", "b.py", "c.txt"],
+            total_files=3,
             branch="main",
             readme_content="# Test Repo",
-            structure="- a.py\n- b.py\n- c.txt",
             file_contents="file contents here",
             token_data=token_data,
-            total_tokens=30,
-            total_files=3,
-            errors=[]
+            total_tokens=30
         )
         assert result.repo_name == "test-repo"
         assert result.branch == "main"
         assert result.total_tokens == 30
         assert result.total_files == 3
         assert len(result.token_data) == 3
+        assert "test-repo" in result.structure  # Test computed property
 
     def test_result_with_errors(self):
+        root_node = FileNode(path="test-repo", name="test-repo", type="dir")
         errors = ["Error 1", "Error 2"]
+        
         result = AnalysisResult(
+            repo_path="/path/to/test-repo",
             repo_name="test-repo",
+            file_tree=root_node,
+            file_paths=[],
+            total_files=0,
             branch=None,
             readme_content="",
-            structure="",
             file_contents="",
             token_data={},
             total_tokens=0,
-            total_files=0,
             errors=errors
         )
         assert len(result.errors) == 2
