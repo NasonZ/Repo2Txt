@@ -450,9 +450,8 @@ class LocalAdapter(RepositoryAdapter):
         file_contents = ""
         token_data = {}
         
-        print(f"\n|>| Processing {len(selected_files)} selected files...")
-        
-        for file_path in tqdm(selected_files, desc="Reading files"):
+        # Process files silently (caller handles visual feedback)
+        for file_path in selected_files:
             content, error = self.get_file_content(file_path)
             
             if content:

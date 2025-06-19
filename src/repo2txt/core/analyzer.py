@@ -10,9 +10,10 @@ from ..core.models import Config, AnalysisResult, FileNode
 from ..core.file_analyzer import FileAnalyzer
 from ..adapters import create_adapter
 from ..utils import FileTreeBuilder, PathUtils
+from ..utils.console import ConsoleManager
 
 try:
-    from rich.progress import Progress, TextColumn, BarColumn, TimeElapsedColumn
+    from rich.progress import Progress, TextColumn, BarColumn, TimeElapsedColumn, SpinnerColumn
     RICH_AVAILABLE = True
 except ImportError:
     from tqdm import tqdm
@@ -22,10 +23,10 @@ except ImportError:
 class RepositoryAnalyzer:
     """Main analyzer for repository analysis and report generation."""
     
-    def __init__(self, config: Config, theme: str = "manhattan"):
-        """Initialize analyzer with configuration and theme."""
+    def __init__(self, config: Config, console: ConsoleManager):
+        """Initialize analyzer with configuration and console."""
         self.config = config
-        self.theme = theme
+        self.console = console
     
     def analyze(self, repo_url_or_path: str) -> AnalysisResult:
         """
@@ -64,13 +65,19 @@ class RepositoryAnalyzer:
         
         # Get file contents
         if selected_paths:
-            file_contents, file_token_data = adapter.get_file_contents(list(selected_paths))
-            token_data.update(file_token_data)
+            processing_start = time.time()
+            
+            with self.console.spinner("[accent]Processing files for content extraction...[/accent]"):
+                file_contents, file_token_data = adapter.get_file_contents(list(selected_paths))
+                token_data.update(file_token_data)
+            
+            processing_duration = time.time() - processing_start
+            total_tokens = sum(file_token_data.values()) if file_token_data else 0
+            self.console.print(f"|>| Processing complete: crunched [highlight]{total_tokens:,}[/highlight] tokens in {len(selected_paths)} files in [highlight]{processing_duration:.1f}s[/highlight]")
         else:
             file_contents = "No files selected.\n"
         
         # Calculate totals
-        total_tokens = sum(token_data.values())
         total_files = len(selected_paths)
         
         # Create a proper file tree structure from the selected paths
@@ -424,43 +431,21 @@ Please analyze this repository to understand its structure, purpose, and functio
             # Import here to avoid circular import issues
             from ..ai import FileSelectorAgent, get_llm_config_from_env
             
-            # Build file tree structure
-            print("|>| Building file tree...")
-            file_tree = adapter.build_file_tree()
+            # Build file tree structure with a spinner for better UX
+            with self.console.spinner("[accent]Building repository file tree...[/accent]"):
+                file_tree = adapter.build_file_tree()
+                file_tree_str = adapter.build_file_tree_string() if hasattr(adapter, 'build_file_tree_string') else self._format_file_tree_string(file_tree)
+            self.console.print("|>| File tree build complete.")
             
-            # Build string representation if needed for compatibility
-            file_tree_str = adapter.build_file_tree_string() if hasattr(adapter, 'build_file_tree_string') else self._format_file_tree_string(file_tree)
-            
-            # Get file list with progress
-            print(f"|>| Scanning repository structure...")
+            # Get file list with progress. For remote repos, we don't know the total
+            # number of files, so an animated spinner is more accurate than a fake progress bar.
             scan_start = time.time()
             
-            try:
-                from rich.progress import Progress, TextColumn, BarColumn, TimeElapsedColumn
-                
-                # Use rich progress for scanning
-                with Progress(
-                    TextColumn("[progress.description]{task.description}"),
-                    BarColumn(),
-                    TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
-                    TextColumn("Exploring..."),
-                    TimeElapsedColumn(),
-                ) as progress:
-                    task = progress.add_task("Scanning files", total=1)
-                    file_paths = adapter.get_file_list()
-                    progress.advance(task)
-                    
-            except ImportError:
-                # Fallback if rich not available
+            with self.console.spinner("[accent]Scanning repository files...[/accent]"):
                 file_paths = adapter.get_file_list()
                 
             scan_duration = time.time() - scan_start
-            if scan_duration < 60:
-                print(f"|>| Scan complete: {len(file_paths)} files found - Completed in {scan_duration:.1f}s")
-            else:
-                minutes = int(scan_duration // 60)
-                seconds = scan_duration % 60
-                print(f"|>| Scan complete: {len(file_paths)} files found - Completed in {minutes}m {seconds:.1f}s")
+            self.console.print(f"|>| Scanning complete: [highlight]{len(file_paths)}[/highlight] files found in [highlight]{scan_duration:.1f}s[/highlight]")
 
             # Extract token data from the tree (for local repos only - GitHub repos skip token counting during tree building)
             token_data = {}
@@ -471,14 +456,19 @@ Please analyze this repository to understand its structure, purpose, and functio
                 # count tokens for all files asynchronously
                 if not token_data and hasattr(adapter, 'owner'):  # GitHub adapter has 'owner' attribute
                     try:
-                        # Use the async processing capability of GitHub adapter
-                        file_contents_dict, token_data = adapter._run_async_processing(file_paths)
-                        print(f"|>| Token counting complete: {sum(token_data.values()):,} total tokens")
+                        # Use the async processing capability of GitHub adapter.
+                        processing_start = time.time()
+                        
+                        with self.console.spinner("[accent]Processing files for token analysis...[/accent]"):
+                            file_contents_dict, token_data = adapter._run_async_processing(file_paths)
+                        
+                        processing_duration = time.time() - processing_start
+                        self.console.print(f"|>| Processing complete: crunched [highlight]{sum(token_data.values()):,}[/highlight] tokens in {len(file_paths)} files in [highlight]{processing_duration:.1f}s[/highlight]")
                         
                         # Update the file tree with actual token counts (no verbose messages)
                         self._update_tree_with_tokens(file_tree, token_data)
                     except Exception as e:
-                        print(f"[!] Async token counting failed: {e}")
+                        self.console.print(f"[!] Async token counting failed: {e}")
                         # Fall back to no token counting for tree display
                         token_data = {}
             
@@ -518,7 +508,7 @@ Please analyze this repository to understand its structure, purpose, and functio
                 openai_api_key=get_llm_config_from_env()['api_key'],
                 model=get_llm_config_from_env()['model'],
                 base_url=get_llm_config_from_env().get('base_url'),
-                theme=self.theme,
+                theme=self.console.theme_name,
                 token_budget=self.config.token_budget,
                 debug_mode=self.config.debug,
                 prompt_style=self.config.prompt_style,
@@ -544,16 +534,16 @@ Please analyze this repository to understand its structure, purpose, and functio
             token_data = {}
             if self.config.enable_token_counting:
                 # Use the adapter's file_analyzer for token counting
-                print(f"|>| Recalculating tokens for {len(selected_files)} selected files...")
+                count_start = time.time()
+                self.console.print(f"|>| Recalculating tokens for {len(selected_files)} selected files...")
                 
                 if RICH_AVAILABLE:
                     # Use Rich progress bar
                     with Progress(
+                        SpinnerColumn(),
                         TextColumn("[progress.description]{task.description}"),
-                        BarColumn(),
-                        TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
                         TextColumn("{task.completed}/{task.total}"),
-                        TimeElapsedColumn(),
+                        TextColumn("[highlight]{task.elapsed:.1f}s[/highlight]"),
                     ) as progress:
                         task = progress.add_task("Final token count", total=len(selected_files))
                         for file_path in selected_files:
@@ -563,6 +553,9 @@ Please analyze this repository to understand its structure, purpose, and functio
                                 if tokens > 0:
                                     token_data[file_path] = tokens
                             progress.advance(task)
+                    
+                    count_duration = time.time() - count_start
+                    self.console.print(f"|>| Token counting complete: [highlight]{sum(token_data.values()):,}[/highlight] tokens in {len(selected_files)} files in [highlight]{count_duration:.1f}s[/highlight]")
                 else:
                     # Fallback to tqdm if Rich not available
                     for file_path in tqdm(selected_files, desc="Final token count"):
@@ -571,6 +564,9 @@ Please analyze this repository to understand its structure, purpose, and functio
                             tokens = adapter.file_analyzer.count_tokens(content)
                             if tokens > 0:
                                 token_data[file_path] = tokens
+                    
+                    count_duration = time.time() - count_start
+                    self.console.print(f"|>| Token counting complete: [highlight]{sum(token_data.values()):,}[/highlight] tokens in {len(selected_files)} files in [highlight]{count_duration:.1f}s[/highlight]")
             
             return structure, selected_paths, token_data
             

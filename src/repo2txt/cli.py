@@ -134,7 +134,7 @@ def main(repo: str, output_dir: str, max_file_size: int, no_tokens: bool,
         
         # Create analyzer
         console.print("[dim]STARTING ANALYZER...[/dim]")
-        analyzer = RepositoryAnalyzer(config, theme)
+        analyzer = RepositoryAnalyzer(config, console)
         
         # Analyze repository
         console.print(f"\n[highlight]> ACQUIRED REPO:[/highlight] [path]{repo}[/path]")

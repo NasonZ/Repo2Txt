@@ -10,7 +10,7 @@ from pathlib import Path
 from dataclasses import dataclass
 
 try:
-    from rich.progress import Progress, TextColumn, BarColumn, TimeElapsedColumn
+    from rich.progress import Progress, TextColumn, BarColumn, TimeElapsedColumn, SpinnerColumn
     RICH_AVAILABLE = True
 except ImportError:
     RICH_AVAILABLE = False
@@ -734,7 +734,7 @@ class GitHubAdapter(RepositoryAdapter):
     
     def _build_file_tree_with_tokens(self) -> FileNode:
         """Build file tree with actual token counts (for interactive mode)."""
-        print("|>| Building file tree...")
+        print("|>| Building file tree...") # TODO: Add progress/scanning bar 
         root = FileNode(
             path="",
             name=self.repo_name,
@@ -961,14 +961,6 @@ class GitHubAdapter(RepositoryAdapter):
         file_contents = {}
         token_data = {}
         
-        # Progress tracking setup
-        progress_counter = 0
-        total_files = len(file_paths)
-        
-        def update_progress(completed: int, total: int):
-            nonlocal progress_counter
-            progress_counter = completed
-        
         async with AsyncGitHubClient(
             self.config.github_token, 
             self.owner, 
@@ -977,35 +969,13 @@ class GitHubAdapter(RepositoryAdapter):
             self.config
         ) as github_client:
             
-            # Process with progress tracking
-            if RICH_AVAILABLE:
-                with Progress(
-                    TextColumn("[progress.description]{task.description}"),
-                    BarColumn(),
-                    TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
-                    TextColumn("{task.completed}/{task.total}"),
-                    TimeElapsedColumn(),
-                ) as progress:
-                    task = progress.add_task("Processing files", total=total_files)
-                    
-                    def rich_progress(completed, total):
-                        progress.update(task, completed=completed)
-                    
-                    results = await process_files_batch(
-                        github_client, 
-                        file_paths, 
-                        self.config.enable_token_counting,
-                        rich_progress
-                    )
-            else:
-                # Fallback to simple counter
-                results = await process_files_batch(
-                    github_client, 
-                    file_paths, 
-                    self.config.enable_token_counting,
-                    update_progress
-                )
-                print(f"Processed {total_files} files")
+            # Process files without progress bar (parent shows spinner)
+            results = await process_files_batch(
+                github_client, 
+                file_paths, 
+                self.config.enable_token_counting,
+                None  # No progress callback needed
+            )
         
         # Convert results to expected format
         for path, result in results.items():

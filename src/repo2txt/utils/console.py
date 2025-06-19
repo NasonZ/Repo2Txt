@@ -51,6 +51,39 @@ class ConsoleManager(ConsoleBase):
     # - print_separator()
     # - print_exception()
     
+    def spinner(self, text: str = "Working...") -> Any:
+        """Return a spinner context manager.
+        
+        Args:
+            text: Text to display next to the spinner.
+            
+        Returns:
+            A context manager that shows a spinner.
+        """
+        if self.use_rich:
+            # Use Rich's status context manager for spinners
+            # Add a left margin and space between spinner and text
+            return self.console.status(f"  {text}", spinner="dots")
+        else:
+            # Fallback for plain consoles (e.g., in CI/CD or logs)
+            class PlainSpinner:
+                def __init__(self, text: str, file: Any):
+                    self.text = text
+                    self.file = file
+                
+                def __enter__(self):
+                    # Print the message once at the beginning
+                    print(self.text, end="... ", file=self.file, flush=True)
+                
+                def __exit__(self, exc_type, exc_val, exc_tb):
+                    # Print "done" on the same line after the task is complete
+                    if exc_type is None:
+                        print("done.", file=self.file)
+                    else:
+                        print("failed.", file=self.file)
+            
+            return PlainSpinner(text, self.file)
+    
     def print_header(self, title: str, subtitle: Optional[str] = None, 
                      width: int = 80, style: str = "header"):
         """Print a section header with consistent styling."""
@@ -355,7 +388,13 @@ class ConsoleManager(ConsoleBase):
         else:
             print(f"\n--- {status_text} ---")
     
-    # print_exception() inherited from ConsoleBase
+    def print_exception(self):
+        """Print the current exception (if in a `except` block)."""
+        if self.use_rich:
+            self.console.print_exception()
+        else:
+            import traceback
+            traceback.print_exc(file=self.file)
 
 
 # Convenience functions for quick access
