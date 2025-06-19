@@ -522,7 +522,8 @@ Please analyze this repository to understand its structure, purpose, and functio
                 token_budget=self.config.token_budget,
                 debug_mode=self.config.debug,
                 prompt_style=self.config.prompt_style,
-                analysis_result=analysis_result  # Pass pre-analyzed data
+                analysis_result=analysis_result,  # Pass pre-analyzed data
+                adapter=adapter  # Pass the original adapter
             )
             
             # Run the AI selection process

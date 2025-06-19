@@ -22,12 +22,14 @@ from .agent_session import AgentSession, SessionConfig
 from .chat_orchestrator import ChatOrchestrator
 from ..core.models import Config, AnalysisResult
 from ..adapters import create_adapter
+from ..adapters.base import RepositoryAdapter
 
 
 class FileSelectorAgent:
     def __init__(self, repo_path: str, openai_api_key: str, model: str, base_url: str = None, 
                  theme: str = "green", token_budget: int = 50000, debug_mode: bool = False, 
-                 prompt_style: str = "standard", analysis_result: Optional[AnalysisResult] = None):
+                 prompt_style: str = "standard", analysis_result: Optional[AnalysisResult] = None,
+                 adapter: Optional[RepositoryAdapter] = None):
         """Initialize the file selector agent.
         
         Args:
@@ -40,11 +42,15 @@ class FileSelectorAgent:
             debug_mode: Enable debug output
             prompt_style: System prompt style
             analysis_result: Pre-analyzed repository data (if provided, skips analysis)
+            adapter: The repository adapter instance (optional)
         """
+        # Store the adapter if provided
+        self.adapter = adapter
+
         # Handle repository path and analysis
         if analysis_result:
-            # Use pre-analyzed data
-            repo_path_obj = Path(repo_path) if repo_path else Path(".")
+            # Use pre-analyzed data - get repo_path from analysis_result if available
+            repo_path_obj = Path(analysis_result.repo_path) if analysis_result.repo_path else (Path(repo_path) if repo_path else Path("."))
             self.analysis_result = analysis_result
         else:
             # Analyze repository from path

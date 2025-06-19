@@ -229,8 +229,16 @@ class CommandHandler:
                 self.ui.print_error(f"Cannot create output directory: {str(e)}")
                 return True
             
-            # Get the adapter to fetch file contents (skip size validation for output generation)
-            adapter = create_adapter(str(self.agent.repo_path), self.agent.config, validate_size=False)
+            # Get the adapter to fetch file contents. Use existing adapter from the agent if
+            # available (for GitHub repos), otherwise create a new one.
+            if hasattr(self.agent, 'adapter') and self.agent.adapter:
+                adapter = self.agent.adapter
+            else:
+                adapter = create_adapter(
+                    str(self.agent.session.config.repo_path), 
+                    self.agent.session.repo_config, 
+                    validate_size=False
+                )
             
             # Collect file contents for selected files
             file_contents_list = []
@@ -276,7 +284,7 @@ class CommandHandler:
             )
             
             result = AnalysisResult(
-                repo_path=str(self.agent.repo_path),
+                repo_path=str(self.agent.session.config.repo_path),
                 repo_name=self.agent.analysis_result.repo_name,
                 file_tree=root_node,
                 file_paths=self.state_manager.state.selected_files,
