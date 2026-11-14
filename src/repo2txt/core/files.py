@@ -80,14 +80,18 @@ SKIP_SUFFIXES = (".min.js", ".min.css", ".map")
 VISIBLE_DOT_DIRS = frozenset({".github", ".gitlab"})
 
 
+def is_skipped_dir(name: str, config: Config) -> bool:
+    """Whether a directory, and everything under it, is left out."""
+    hidden = name.startswith(".") and name not in VISIBLE_DOT_DIRS
+    return name in config.excluded_dirs or hidden or name.endswith(".egg-info")
+
+
 def is_candidate(path: str, size: int, config: Config) -> bool:
     """Decide from the path and size alone whether a file should be read."""
     pure = PurePosixPath(path)
     *dirs, name = pure.parts
-    for part in dirs:
-        hidden = part.startswith(".") and part not in VISIBLE_DOT_DIRS
-        if part in config.excluded_dirs or hidden or part.endswith(".egg-info"):
-            return False
+    if any(is_skipped_dir(part, config) for part in dirs):
+        return False
     if name.startswith("."):
         return False
     if name in SKIP_NAMES or name.endswith(SKIP_SUFFIXES):

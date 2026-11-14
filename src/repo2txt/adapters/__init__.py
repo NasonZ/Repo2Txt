@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from ..core.models import Config
-from .base import Source
+from .base import Source, SourceError
 from .github import GitHubSource, parse_github_ref
 from .local import LocalSource
 
@@ -14,5 +14,5 @@ def open_source(ref: str, config: Config, branch: str | None = None) -> Source:
         return LocalSource(ref, config)
     parsed = parse_github_ref(ref)
     if parsed is None:
-        raise ValueError(f"{ref!r} is not a directory, a GitHub URL or an owner/repo name.")
+        raise SourceError(f"{ref!r} is not a directory, a GitHub URL or an owner/repo name.")
     return GitHubSource(*parsed, config, branch=branch)

@@ -131,7 +131,8 @@ class FileSelectorAgent:
             message = self.llm.create_completion(history, tools).choices[0].message
             content = message.content or ""
             calls = parse_openai_tool_calls(message.tool_calls)
-            self.ui.print(f"\n[cyan][<][/cyan] {content}")
+            self.ui.print("\n[cyan][<][/cyan] ", end="")
+            self.ui.plain(content)
         for call in calls:
             self.ui.warning(f"Calling tool: {call.tool_name}")
         return content, calls

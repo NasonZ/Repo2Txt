@@ -8,6 +8,10 @@ from ..core.models import Config, RepoFile, Repository
 from ..core.tokens import count_tokens
 
 
+class SourceError(Exception):
+    """The repository as a whole cannot be read: not found, rate limited, unreachable."""
+
+
 class Source(ABC):
     """A place files can be listed from and read."""
 
@@ -30,7 +34,7 @@ class Source(ABC):
         """Read every candidate file and count its tokens."""
         listing = self.list_files()
         if len(listing) > self.config.max_files:
-            raise ValueError(
+            raise SourceError(
                 f"{self.name} has {len(listing):,} candidate files; the limit is "
                 f"{self.config.max_files:,}. Exclude directories with --exclude-dirs."
             )
@@ -40,6 +44,8 @@ class Source(ABC):
         def read(path: str) -> RepoFile | None:
             try:
                 text = decode(self.fetch(path))
+            except SourceError:
+                raise
             except Exception as exc:
                 errors.append(f"{path}: {exc}")
                 return None
@@ -48,6 +54,6 @@ class Source(ABC):
             return RepoFile(path, text, count_tokens(text))
 
         with ThreadPoolExecutor(max_workers=self.workers) as pool:
-            results = pool.map(read, sorted(listing))
+            results = list(pool.map(read, sorted(listing)))
         files = {f.path: f for f in results if f is not None}
         return Repository(self.name, self.branch, files, errors)

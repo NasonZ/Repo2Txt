@@ -4,7 +4,9 @@ import json
 from typing import Any
 
 from rich.console import Console
+from rich.markup import escape
 from rich.panel import Panel
+from rich.text import Text
 
 
 class UI:
@@ -15,35 +17,40 @@ class UI:
         self.debug = debug
 
     def print(self, *args: Any, **kwargs: Any) -> None:
+        """Print with Rich markup. Escape any path or model text interpolated into it."""
         self.console.print(*args, **kwargs)
 
+    def plain(self, text: str) -> None:
+        """Print text exactly as given, with no markup."""
+        self.console.print(Text(text))
+
     def info(self, message: str) -> None:
-        self.console.print(f"[cyan]{message}[/cyan]")
+        self.console.print(Text(message, style="cyan"))
 
     def success(self, message: str) -> None:
-        self.console.print(f"[green]{message}[/green]")
+        self.console.print(Text(message, style="green"))
 
     def warning(self, message: str) -> None:
-        self.console.print(f"[yellow]{message}[/yellow]")
+        self.console.print(Text(message, style="yellow"))
 
     def error(self, message: str) -> None:
-        self.console.print(f"[red]{message}[/red]")
+        self.console.print(Text(message, style="red"))
 
     def spinner(self, text: str):
         return self.console.status(text)
 
     def section(self, title: str, body: str) -> None:
-        self.console.print(Panel(body, title=title, border_style="blue", padding=(1, 2)))
+        self.console.print(Panel(Text(body), title=title, border_style="blue", padding=(1, 2)))
 
     def stream(self, text: str, tool_call: bool = False) -> None:
-        self.console.print(text, style="yellow" if tool_call else None, end="")
+        self.console.print(Text(text, style="yellow" if tool_call else ""), end="")
 
     def debug_panel(self, title: str, body: str, style: str = "magenta", limit: int = 2500) -> None:
         if not self.debug:
             return
         if len(body) > limit:
             body = body[:limit] + "\n... [truncated]"
-        self.console.print(Panel(body, title=title, border_style=style, padding=(0, 1)))
+        self.console.print(Panel(Text(body), title=title, border_style=style, padding=(0, 1)))
 
     def tool_call(self, name: str, arguments: dict[str, Any]) -> None:
         self.debug_panel(f"TOOL CALL {name}", json.dumps(arguments, indent=2), style="yellow")
@@ -62,9 +69,9 @@ class UI:
             return
         self.print("\nSelection changes:")
         for path in sorted(before - after):
-            self.print(f"  [red]-[/red] {path}")
+            self.print(f"  [red]-[/red] {escape(path)}")
         for path in sorted(after - before):
-            self.print(f"  [green]+[/green] {path}")
+            self.print(f"  [green]+[/green] {escape(path)}")
         delta = state.total_tokens_selected - state.previous_tokens
         self.print(
             f"Total {state.total_tokens_selected:,} tokens ({delta:+,}), "

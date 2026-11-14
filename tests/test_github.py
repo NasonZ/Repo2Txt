@@ -2,7 +2,7 @@ import os
 
 import pytest
 
-from repo2txt.adapters import open_source
+from repo2txt.adapters import SourceError, open_source
 from repo2txt.adapters.github import parse_github_ref
 from repo2txt.core.models import Config
 
@@ -27,7 +27,7 @@ def test_rejects_things_that_are_not_repositories(ref):
 
 
 def test_unknown_reference_is_an_error(tmp_path):
-    with pytest.raises(ValueError, match="not a directory"):
+    with pytest.raises(SourceError, match="not a directory"):
         open_source(str(tmp_path / "missing" / "dir"), Config())
 
 

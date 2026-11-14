@@ -7,7 +7,7 @@ import httpx
 
 from ..core.files import is_candidate
 from ..core.models import Config
-from .base import Source
+from .base import Source, SourceError
 
 API = "https://api.github.com"
 _URL_PREFIX = re.compile(r"^(?:https?://)?(?:www\.)?github\.com/")
@@ -43,14 +43,21 @@ class GitHubSource(Source):
         self._shas: dict[str, str] = {}
 
     def _get(self, url: str, **params: str) -> dict:
-        response = self.client.get(url, params=params)
+        try:
+            response = self.client.get(url, params=params)
+        except httpx.HTTPError as exc:
+            raise SourceError(f"Could not reach GitHub: {exc}") from exc
         if response.status_code == 404:
-            raise ValueError(
+            raise SourceError(
                 f"{self.owner}/{self.repo} not found. For a private repository set GITHUB_TOKEN."
             )
-        if response.status_code == 403 and response.headers.get("x-ratelimit-remaining") == "0":
-            raise ValueError("GitHub rate limit reached. Set GITHUB_TOKEN to raise the limit.")
-        response.raise_for_status()
+        if response.status_code in (403, 429):
+            raise SourceError(
+                f"GitHub refused the request ({response.status_code}): rate limit reached or "
+                "access denied. Set GITHUB_TOKEN."
+            )
+        if response.is_error:
+            raise SourceError(f"GitHub returned {response.status_code} for {url}.")
         return response.json()
 
     def list_files(self) -> dict[str, int]:
@@ -59,7 +66,9 @@ class GitHubSource(Source):
             self.branch = self._get(base)["default_branch"]
         tree = self._get(f"{base}/git/trees/{self.branch}", recursive="1")
         if tree.get("truncated"):
-            raise ValueError("The repository tree is too large for the GitHub API to list in full.")
+            raise SourceError(
+                "The repository tree is too large for the GitHub API to list in full."
+            )
         listing: dict[str, int] = {}
         for entry in tree["tree"]:
             if entry["type"] != "blob" or entry["mode"] == "120000":

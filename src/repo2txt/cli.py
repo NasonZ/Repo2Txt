@@ -5,7 +5,7 @@ import sys
 import click
 from dotenv import load_dotenv
 
-from .adapters import open_source
+from .adapters import SourceError, open_source
 from .ai import PROMPT_STYLES, ConfigError, FileSelectorAgent, LLMSettings
 from .core.models import Config
 from .core.output import write_outputs
@@ -102,7 +102,7 @@ def main(
         settings = LLMSettings.from_env() if ai_select else None
         with ui.spinner("Reading repository..."):
             repository = open_source(repo, config, branch).load()
-    except (ConfigError, ValueError) as exc:
+    except (ConfigError, SourceError) as exc:
         ui.error(str(exc))
         sys.exit(1)
 
@@ -127,12 +127,19 @@ def main(
             sys.exit(1)
     else:
         selected, dropped = select_within_budget(repository, token_budget)
+        if not selected:
+            ui.error(
+                "No files to write."
+                if token_budget is None
+                else f"No file fits within {token_budget:,} tokens."
+            )
+            sys.exit(1)
         if dropped:
             ui.warning(f"Dropped {len(dropped)} largest files to fit the budget:")
             for path in dropped:
-                ui.print(f"  {path} ({repository.files[path].tokens:,} tokens)")
+                ui.plain(f"  {path} ({repository.files[path].tokens:,} tokens)")
 
     written = write_outputs(repository, selected, output_dir, fmt, export_json)
     ui.success(f"Selected {len(selected)} files, {repository.tokens(selected):,} tokens.")
     for path in written.values():
-        ui.print(f"  {path}")
+        ui.plain(f"  {path}")

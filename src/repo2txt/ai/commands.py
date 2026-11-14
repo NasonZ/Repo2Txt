@@ -82,7 +82,7 @@ def _generate(agent: "FileSelectorAgent", args: list[str]) -> None:
     written = write_outputs(agent.repo, paths, agent.output_dir, fmt, export_json="json" in args)
     agent.ui.success(f"Wrote {len(paths)} files ({agent.repo.tokens(paths):,} tokens):")
     for path in written.values():
-        agent.ui.print(f"  {path}")
+        agent.ui.plain(f"  {path}")
 
 
 def _save(agent: "FileSelectorAgent", name: str | None) -> None:

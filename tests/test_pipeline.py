@@ -61,3 +61,24 @@ def test_missing_model_stops_ai_mode_before_reading_anything(fixture_repo, tmp_p
     assert result.exit_code == 1
     assert "LLM_MODEL" in result.output
     assert not list(tmp_path.glob("*_*"))
+
+
+def test_paths_with_brackets_are_reported_as_written(fixture_repo, tmp_path):
+    page = fixture_repo / "app" / "[id]" / "page.tsx"
+    page.parent.mkdir(parents=True)
+    page.write_text("export default function Page() {}\n" * 400)
+
+    result = CliRunner().invoke(
+        main, [str(fixture_repo), "-o", str(tmp_path), "--token-budget", "1500"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "app/[id]/page.tsx" in result.output
+
+
+def test_a_budget_no_file_fits_is_an_error(fixture_repo, tmp_path):
+    out = tmp_path / "out"
+    result = CliRunner().invoke(main, [str(fixture_repo), "-o", str(out), "--token-budget", "1"])
+
+    assert result.exit_code == 1
+    assert not out.exists()

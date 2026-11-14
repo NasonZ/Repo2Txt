@@ -3,9 +3,9 @@
 import os
 from pathlib import Path
 
-from ..core.files import is_candidate
+from ..core.files import is_candidate, is_skipped_dir
 from ..core.models import Config
-from .base import Source
+from .base import Source, SourceError
 
 
 class LocalSource(Source):
@@ -15,14 +15,18 @@ class LocalSource(Source):
         super().__init__(config)
         self.root = Path(root).resolve()
         if not self.root.is_dir():
-            raise ValueError(f"Not a directory: {root}")
+            raise SourceError(f"Not a directory: {root}")
         self.name = self.root.name or str(self.root)
 
     def list_files(self) -> dict[str, int]:
         listing: dict[str, int] = {}
         for dirpath, dirnames, filenames in os.walk(self.root):
             current = Path(dirpath)
-            dirnames[:] = [d for d in dirnames if not (current / d).is_symlink()]
+            dirnames[:] = [
+                d
+                for d in dirnames
+                if not is_skipped_dir(d, self.config) and not (current / d).is_symlink()
+            ]
             for filename in filenames:
                 full = current / filename
                 if full.is_symlink():
