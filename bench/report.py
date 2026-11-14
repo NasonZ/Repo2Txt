@@ -61,7 +61,7 @@ def main() -> None:
     spent = [
         (r["input_tokens"], r["output_tokens"])
         for r in rows
-        if r["input_tokens"] and r["method"] != "llm-fill"
+        if r["input_tokens"] and not r["method"].endswith("-fill")
     ]
     if spent:
         print(
