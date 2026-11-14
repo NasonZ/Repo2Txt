@@ -8,6 +8,7 @@ from . import tree
 from .api import repo_map
 from .llm import Call, Complete
 from .models import Repository
+from .render import map_text
 from .selection import Change, Selection
 
 # Rounds of tool calls the model gets per request, so it can correct a refused selection.
@@ -35,7 +36,10 @@ Tools:
 
 When the selection is right, reply in one or two sentences saying what you chose and why.
 
-Repository ({files} files, {tokens:,} tokens; a directory line reads `name/ tokens (files)`):
+The repository follows. Indentation shows nesting, so a file's path is its directory names
+and its own name joined with `/`, as in `src/app/main.py`. A directory line reads
+`name/ tokens (files)`; directories shown without their contents are collapsed.
+
 {tree}
 """
 
@@ -74,12 +78,11 @@ class Selector:
         self.messages: list[dict[str, Any]] = []
         self.input_tokens = 0
         self.output_tokens = 0
-        self._map = repo_map(repo, max_tokens=TREE_TOKENS)
-        self._tree = tree.render(self._map.entries)
+        self._tree = map_text(repo_map(repo, max_tokens=TREE_TOKENS), TREE_TOKENS)
         self._handlers: dict[str, Callable[..., str]] = {
-            "select_files": lambda paths=(): self._report(self.selection.replace(paths)),
+            "select_files": lambda paths: self._report(self.selection.replace(_paths(paths))),
             "adjust_selection": lambda add=(), remove=(): self._report(
-                self.selection.adjust(add, remove)
+                self.selection.adjust(_paths(add), _paths(remove))
             ),
             "list_dir": self._list_dir,
         }
@@ -112,20 +115,21 @@ class Selector:
             name=self.repo.name,
             budget=selection.budget,
             selected=selected,
-            files=self._map.files,
-            tokens=self._map.tokens,
             tree=self._tree,
         )
         return [{"role": "system", "content": system}, *self.messages]
 
     def _run(self, call: Call) -> str:
+        """Run one tool call. Whatever goes wrong, the model gets a reply it can act on."""
         handler = self._handlers.get(call.name)
         if handler is None:
             return f"There is no tool named {call.name}."
+        if call.arguments is None:
+            return f"The arguments for {call.name} were not valid JSON. Nothing was changed."
         try:
             return handler(**call.arguments)
-        except TypeError as exc:
-            return f"Bad arguments for {call.name}: {exc}"
+        except (TypeError, ValueError) as exc:
+            return f"Bad arguments for {call.name}: {exc}. Nothing was changed."
 
     def _report(self, change: Change) -> str:
         """Tell the model what its change did, in terms it can act on."""
@@ -160,6 +164,12 @@ class Selector:
         if len(items) > LIST_LIMIT:
             lines.append(f"... {len(items) - LIST_LIMIT} more; list a subdirectory instead.")
         return "\n".join(lines)
+
+
+def _paths(value: Any) -> list[str]:
+    if isinstance(value, (list, tuple)) and all(isinstance(item, str) for item in value):
+        return list(value)
+    raise ValueError("paths must be a list of strings")
 
 
 def _assistant(text: str, calls: list[Call]) -> dict[str, Any]:

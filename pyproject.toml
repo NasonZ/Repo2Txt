@@ -24,13 +24,12 @@ classifiers = [
 dependencies = [
     "click>=8.1",
     "httpx>=0.27",
-    "openai>=1.0",
     "python-dotenv>=1.0",
-    "rich>=13.0",
     "tiktoken>=0.7",
 ]
 
 [project.optional-dependencies]
+llm = ["openai>=1.0", "rich>=13.0"]
 mcp = ["mcp>=2.3"]
 
 [project.scripts]
@@ -41,7 +40,7 @@ Repository = "https://github.com/NasonZ/Repo2Txt"
 Issues = "https://github.com/NasonZ/Repo2Txt/issues"
 
 [dependency-groups]
-dev = ["pytest>=8.3", "ruff>=0.11", "mcp>=2.3"]
+dev = ["pytest>=8.3", "ruff>=0.11", "mcp>=2.3", "openai>=1.0", "rich>=13.0"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

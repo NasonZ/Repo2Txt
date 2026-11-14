@@ -31,7 +31,8 @@ class Selection:
 
     @property
     def total(self) -> int:
-        return self.repo.tokens(self.paths)
+        """What the selection takes when packed, which is what the budget limits."""
+        return self.repo.cost(self.paths)
 
     def replace(self, paths: Iterable[str]) -> Change:
         """Make `paths` the whole selection, in the order given."""
@@ -49,7 +50,7 @@ class Selection:
         kept = [p for p in start if p not in remove]
         proposed = kept + [p for p in add if p in self.repo.files and p not in kept]
 
-        total = self.repo.tokens(proposed)
+        total = self.repo.cost(proposed)
         # Shrinking a selection that is already over budget (the budget was lowered) is allowed.
         if total > self.budget and total >= self.total:
             return Change(False, unknown=unknown, over_by=total - self.budget)
@@ -64,7 +65,9 @@ class Selection:
 
 
 def fit(ranked: Iterable[str], repo: Repository, budget: int | None) -> tuple[list[str], list[str]]:
-    """Take paths in rank order while they fit the budget. Returns `(kept, skipped)`.
+    """Take paths in rank order while their packed cost fits the budget.
+
+    Returns `(kept, skipped)`.
 
     A file that does not fit is skipped and later, smaller ones are still tried.
     """
@@ -74,10 +77,10 @@ def fit(ranked: Iterable[str], repo: Repository, budget: int | None) -> tuple[li
     repo.count(ranked)
     kept, skipped, total = [], [], 0
     for path in ranked:
-        tokens = repo.files[path].tokens
-        if total + tokens <= budget:
+        cost = repo.files[path].cost
+        if total + cost <= budget:
             kept.append(path)
-            total += tokens
+            total += cost
         else:
             skipped.append(path)
     return kept, skipped

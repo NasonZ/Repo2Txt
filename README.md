@@ -39,14 +39,16 @@ Output from 14 November 2026; the last command prints the files themselves.
 ## Install
 
 ```bash
-uv tool install git+https://github.com/NasonZ/Repo2Txt     # or: pip install git+https://...
+uv tool install git+https://github.com/NasonZ/Repo2Txt
 ```
 
-Python 3.11 or later.
+Python 3.11 or later. `map`, `select` and `pack` need nothing more. Choosing with a model
+needs the `llm` extra and the MCP server the `mcp` extra:
+`uv tool install "repo2txt[llm,mcp] @ git+https://github.com/NasonZ/Repo2Txt"`.
 
 ## Commands
 
-Every command takes `-r/--repo` (a directory, a GitHub URL or `owner/repo`; default `.`),
+`map`, `select` and `pack` take `-r/--repo` (a directory, a GitHub URL or `owner/repo`; default `.`),
 `--ref` (a GitHub branch, tag or commit), `-i/--include` and `-e/--exclude` globs, and
 `--json`. Budgets are written `8000`, `8k` or `1.5m`. Output goes to stdout.
 
@@ -55,15 +57,20 @@ fit `--max-tokens` (default 4k) it is shown to the deepest level that does, and 
 below that are one line each with their totals. `--depth N` fixes the level.
 
 **`repo2txt select QUERY`** ranks files for a question and lists those that fit `-b/--budget`
-(default 32k), best first, as `path<TAB>tokens`. It prints no contents. `--method bm25` (the
+(default 32k), best first, as `path<TAB>tokens`. It prints no contents. The count is what the
+file takes when packed, its heading included, and 60 tokens of the budget are left for the
+packed document's own heading, so a selection always packs within the same budget. `--method bm25` (the
 default) scores paths, identifiers and text and needs no model. `--method llm` gives a model
 the tree and lets it choose; see below.
 
 **`repo2txt pack [ITEMS...]`** prints the contents of files as Markdown (or `-f xml`). An item
 is a path, a directory, a glob, or `path:10-80` for a line range. Files are included whole in
-the order given until `-b/--budget` is full. What does not fit is listed with its token cost
-and is never cut. With no items the whole repository is packed, smallest files first.
-`--stdin` reads items from a pipe; `-o FILE` writes the document and prints a summary.
+the order given until `-b/--budget` is full. The budget covers everything printed, headings
+and notes included. What does not fit is listed with its token cost and is never cut. With
+`-f xml` the files sit inside XML-style tags and their contents are left exactly as they
+are, so the result is for a model to read, not for an XML parser. With no items the whole repository is packed, smallest files first.
+`--stdin` reads items from a pipe, and fails if the pipe names none; `-o FILE` writes the
+document and prints a summary.
 
 **`repo2txt chat`** is a terminal conversation with a model that builds a selection:
 `/generate [FILE]`, `/undo`, `/clear`, `/budget N`, `/quit`.
@@ -79,7 +86,8 @@ In a git work tree the file list comes from `git ls-files`: tracked files, and u
 that git does not ignore. A GitHub repository is read from its tarball in two requests, so
 public repositories need no token; set `GITHUB_TOKEN` for private ones. Hidden files and
 directories (except `.github` and `.gitlab`), `node_modules`, lockfiles, minified files,
-source maps, binary formats, files containing null bytes and files over 1 MB are left out.
+source maps, binary formats, files with a null byte in their first 8 KB and files over 1 MB
+are left out.
 Symbolic links are not followed.
 
 Tokens are counted with tiktoken's `o200k_base`. Other tokenisers differ, usually by under a
@@ -98,7 +106,8 @@ uv tool install "repo2txt[mcp] @ git+https://github.com/NasonZ/Repo2Txt"
 claude mcp add repo2txt -- repo2txt mcp
 ```
 
-The three tools are read-only and return the same text as the commands. Their default cap is
+The three tools are read-only and return the same text as the commands. The server reads
+local directories only inside the directory it was started in, and any GitHub repository. Their default cap is
 4,000 tokens, under the size at which Claude Code warns (10,000) and pi truncates (20 KB).
 
 The command line is the main interface: a skill costs an agent a few hundred tokens of
@@ -144,6 +153,9 @@ default calls an OpenAI-compatible endpoint; any other client can be passed in i
 uv run pytest
 uv run ruff check && uv run ruff format --check
 ```
+
+git is run with `core.fsmonitor` and hooks disabled, so a repository's own configuration
+cannot start a program when it is read.
 
 The tests run the commands on a small repository built in a temporary directory, read GitHub
 through a stand-in transport that serves a generated tarball, drive the selector with scripted

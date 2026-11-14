@@ -2,7 +2,7 @@
 name: repo2txt
 description: Find and read the right files of a repository within a token budget. Use when exploring an unfamiliar or large codebase, when a question needs files you have not located yet, when you must hand a subagent or another model a bounded bundle of code, or when a repository lives on GitHub and is not checked out locally.
 license: MIT
-compatibility: Needs the repo2txt command (pip install repo2txt or uvx repo2txt). Reading from GitHub needs network access.
+compatibility: Needs the repo2txt command (uv tool install git+https://github.com/NasonZ/Repo2Txt). Reading from GitHub needs network access.
 ---
 
 # repo2txt

@@ -11,7 +11,7 @@ def repository(sizes: dict[str, int]) -> Repository:
     for path, tokens in sizes.items():
         files[path] = RepoFile(path, "")
         files[path].__dict__["tokens"] = tokens
-    return Repository("demo", ".", None, files)
+    return Repository("demo", [], None, files)
 
 
 class Script:
@@ -47,9 +47,10 @@ def test_the_model_can_correct_a_selection_that_was_refused():
     assert selector.ask("where is a?") == "Selected a.py."
     assert selector.selection.paths == ["a.py"]
     refused, unknown, done = results(script)
-    assert "20 tokens over the budget" in refused and "unchanged" in refused
+    over = repo.cost(["a.py", "b.py"]) - 100
+    assert f"{over} tokens over the budget" in refused and "unchanged" in refused
     assert "src/a.py" in unknown
-    assert "1 files, 60 of 100 tokens" in done
+    assert f"1 files, {repo.cost(['a.py'])} of 100 tokens" in done
 
 
 def test_a_selection_never_exceeds_the_budget_even_if_the_model_insists():
@@ -101,3 +102,23 @@ def test_a_selection_over_a_lowered_budget_may_shrink_but_not_grow():
     assert not selection.adjust(add=["c.py"]).applied
     assert selection.adjust(remove=["b.py"]).applied
     assert selection.paths == ["a.py"]
+
+
+def test_bad_tool_arguments_change_nothing_and_always_get_a_reply():
+    repo = repository({"a.py": 10})
+    script = Script(
+        ("select_files", {"paths": ["a.py"]}),
+        ("select_files", None),  # not JSON
+        ("select_files", {"paths": [1]}),
+        ("select_files", {"paths": "a.py"}),
+        ("nonsense", {}),
+        "Done.",
+    )
+    selector = Selector(repo, 100, script)
+
+    selector.ask("a")
+
+    assert selector.selection.paths == ["a.py"]
+    calls = [m for m in selector.messages if m["role"] == "assistant" and m.get("tool_calls")]
+    assert len(results(script)) == len(calls) == 5
+    assert all("Nothing was changed" in text or "no tool" in text for text in results(script)[1:])

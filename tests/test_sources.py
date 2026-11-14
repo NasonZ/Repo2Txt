@@ -1,5 +1,7 @@
 import io
 import os
+import shutil
+import subprocess
 import tarfile
 
 import httpx
@@ -90,3 +92,38 @@ def test_loads_a_public_repository():
     repo = load("Doriandarko/RepoToTextForLLMs")
 
     assert repo.files and repo.tokens() > 0
+
+
+@pytest.mark.parametrize("ref", ["../../../user", "main?x=1", "-x", "a b"])
+def test_a_ref_that_could_redirect_the_request_is_refused_before_any_request(ref):
+    requests: list[str] = []
+
+    with pytest.raises(SourceError, match="not a branch"):
+        load("owner/repo", ref=ref, transport=github({}, requests))
+
+    assert requests == []
+
+
+def test_a_response_that_is_not_an_archive_is_reported():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=b"not a tarball")
+
+    with pytest.raises(SourceError, match="readable archive"):
+        load("owner/repo", ref="main", transport=httpx.MockTransport(handler))
+
+
+@pytest.mark.skipif(not shutil.which("git"), reason="needs git")
+def test_a_repository_cannot_make_git_run_its_own_program(tmp_path):
+    marker = tmp_path / "ran"
+    script = tmp_path / "hook.sh"
+    script.write_text(f"#!/bin/sh\ntouch {marker}\n")
+    script.chmod(0o755)
+    root = tmp_path / "repo"
+    root.mkdir()
+    (root / "a.py").write_text("A = 1\n")
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    subprocess.run(["git", "-C", str(root), "config", "core.fsmonitor", str(script)], check=True)
+
+    repo = load(str(root))
+
+    assert list(repo.files) == ["a.py"] and not marker.exists()

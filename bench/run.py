@@ -9,6 +9,7 @@ run can be stopped and resumed.
 import argparse
 import io
 import json
+import os
 import subprocess
 import tarfile
 import time
@@ -30,12 +31,14 @@ from .tasks import CACHE, Task, sample
 Method = Callable[[Repository, Task, Gold, int], tuple[list[str], int, int]]
 
 
-def plain(name: str) -> Method:
-    return lambda repo, task, gold, budget: (
-        [path for path, _ in METHODS[name](repo, task.query, budget, None)],
-        0,
-        0,
-    )
+def bm25(repo: Repository, task: Task, gold: Gold, budget: int) -> tuple[list[str], int, int]:
+    return [path for path, _ in METHODS["bm25"](repo, task.query, budget, None)], 0, 0
+
+
+def smallest(repo: Repository, task: Task, gold: Gold, budget: int) -> tuple[list[str], int, int]:
+    """The floor: as many files as fit, ignoring the question."""
+    repo.count()
+    return sorted(repo.files, key=lambda p: (repo.files[p].tokens, p)), 0, 0
 
 
 def oracle(repo: Repository, task: Task, gold: Gold, budget: int) -> tuple[list[str], int, int]:
@@ -51,12 +54,7 @@ def llm(repo: Repository, task: Task, gold: Gold, budget: int) -> tuple[list[str
     return selector.selection.paths, selector.input_tokens, selector.output_tokens
 
 
-RUNNERS: dict[str, Method] = {
-    "smallest": plain("smallest"),
-    "bm25": plain("bm25"),
-    "oracle": oracle,
-    "llm": llm,
-}
+RUNNERS: dict[str, Method] = {"smallest": smallest, "bm25": bm25, "oracle": oracle, "llm": llm}
 
 
 def repository(task: Task) -> tuple[Repository, set[str]]:
@@ -66,7 +64,9 @@ def repository(task: Task) -> tuple[Repository, set[str]]:
     if not path.exists():
         path.parent.mkdir(parents=True, exist_ok=True)
         archive, _ = download_tarball(owner, name, task.sha)
-        path.write_bytes(archive)
+        partial = path.with_suffix(".part")
+        partial.write_bytes(archive)
+        partial.rename(path)  # An interrupted download never leaves a file that looks whole.
     archive = path.read_bytes()
     with tarfile.open(fileobj=io.BytesIO(archive), mode="r:gz") as tar:
         names = {m.name.partition("/")[2] for m in tar if m.isfile()}
@@ -74,7 +74,8 @@ def repository(task: Task) -> tuple[Repository, set[str]]:
     for file_path, data in tar_files(archive, lambda p, size: is_candidate(p, size, 1_000_000)):
         if (text := decode(data)) is not None:
             files[file_path] = RepoFile(file_path, text)
-    return Repository(name, task.repo, task.sha, dict(sorted(files.items()))), names
+    where = ["-r", task.repo, "--ref", task.sha]
+    return Repository(name, where, task.sha, dict(sorted(files.items()))), names
 
 
 def main() -> None:
@@ -88,13 +89,22 @@ def main() -> None:
     budgets = [parse_budget(b) for b in args.budgets.split(",")]
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
-    done = set()
+    # Keep finished rows; drop failed ones and a last line cut short, so they are run again.
+    rows = []
     if out.exists():
-        done = {(r["task"], r["method"], r["budget"]) for r in map(json.loads, out.open())}
+        for line in out.read_text().splitlines():
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not row["error"]:
+                rows.append(row)
+        out.write_text("".join(json.dumps(row) + "\n" for row in rows))
+    done = {(row["task"], row["method"], row["budget"]) for row in rows}
     commit = subprocess.run(
         ["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True
     ).stdout.strip()
-    model = {"llm": __import__("os").getenv("LLM_MODEL")}
+    model = {"llm": os.getenv("LLM_MODEL")}
 
     for number, task in enumerate(sample(args.tasks), 1):
         todo = [(m, b) for m in methods for b in budgets if (task.id, m, b) not in done]
@@ -131,7 +141,6 @@ def main() -> None:
                 "gold_filtered": len(gold.filtered),
                 "selected": len(selected),
                 "tokens": repo.tokens(selected),
-                "over_budget": len(ranked) - len(selected) if method == "llm" else 0,
                 **score(selected, gold.files),
                 "input_tokens": tokens_in,
                 "output_tokens": tokens_out,

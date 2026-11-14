@@ -5,36 +5,35 @@ import re
 from collections.abc import Callable, Sequence
 from dataclasses import asdict
 from typing import Any
-from xml.sax.saxutils import quoteattr
+from xml.sax.saxutils import escape, quoteattr
 
 from . import tree
 from .api import MapResult, PackResult, SelectResult
 from .tokens import count_tokens
 
+OMITTED_SHOWN = 10
 XML_LINES = ' lines="{}-{}"'
 
 
 def capped(
     items: Sequence[Any], text_of: Callable[[Sequence[Any], bool], str], max_tokens: int
 ) -> str:
-    """Render as many leading items as fit in `max_tokens`.
+    """Render what fits in `max_tokens`: hints are dropped first, then items from the end.
 
-    `text_of(items, hints)` renders a subset and states what it left out. Hints are dropped
-    before items are.
+    `text_of(items, hints)` renders a subset and states what it left out. The heading is
+    always printed, so a cap smaller than the heading is exceeded by that much.
     """
     for hints in (True, False):
         if count_tokens(text := text_of(items, hints)) <= max_tokens:
             return text
-        low, high = 0, len(items) - 1
-        while low < high:
-            middle = (low + high + 1) // 2
-            if count_tokens(text_of(items[:middle], hints)) <= max_tokens:
-                low = middle
-            else:
-                high = middle - 1
-        if low > 0:
-            return text_of(items[:low], hints)
-    return text_of(items[:0], False)
+    low, high = 0, len(items) - 1
+    while low < high:
+        middle = (low + high + 1) // 2
+        if count_tokens(text_of(items[:middle], False)) <= max_tokens:
+            low = middle
+        else:
+            high = middle - 1
+    return text_of(items[:low], False)
 
 
 def _notes(shown: int, total: int, what: str, hints: list[str]) -> list[str]:
@@ -101,6 +100,7 @@ def pack_json(result: PackResult) -> str:
 
 def pack_text(result: PackResult, fmt: str = "markdown") -> str:
     """The packed files as one document. Content is never altered or cut."""
+    shown, more = result.omitted[:OMITTED_SHOWN], max(len(result.omitted) - OMITTED_SHOWN, 0)
     if fmt == "xml":
         head = (
             f"<repository name={quoteattr(result.repo)} ref={quoteattr(result.ref or '')} "
@@ -108,8 +108,10 @@ def pack_text(result: PackResult, fmt: str = "markdown") -> str:
         )
         notes = [
             f'<omitted path={quoteattr(o.path)} tokens="{o.tokens}" reason="{o.reason}"/>'
-            for o in result.omitted
-        ] + [f"<next>{hint}</next>" for hint in result.next]
+            for o in shown
+        ]
+        notes += [f'<omitted more="{more}"/>'] if more else []
+        notes += [f"<next>{escape(hint)}</next>" for hint in result.next]
         blocks = [
             f"<file path={quoteattr(f.path)}{_lines(f.lines, XML_LINES)}>\n{f.content}\n</file>"
             for f in result.files
@@ -118,7 +120,8 @@ def pack_text(result: PackResult, fmt: str = "markdown") -> str:
 
     ref = f" ({result.ref})" if result.ref else ""
     head = f"# {result.repo}{ref}: {len(result.files)} files, {result.tokens:,} tokens"
-    notes = [f"- omitted: {o.path}, {o.tokens:,} tokens, {o.reason}" for o in result.omitted]
+    notes = [f"- omitted: {o.path}, {o.tokens:,} tokens, {o.reason}" for o in shown]
+    notes += [f"- and {more} more omitted"] if more else []
     notes += [f"- next: `{hint}`" for hint in result.next]
     blocks = []
     for f in result.files:
@@ -133,7 +136,11 @@ def pack_summary(result: PackResult) -> str:
     """What was packed, without the content: for when the document goes to a file."""
     lines = [f"# {result.repo}: {len(result.files)} files, {result.tokens:,} tokens"]
     lines += [f"{f.path}{_lines(f.lines, ':{}-{}')}\t{f.tokens}" for f in result.files]
-    lines += [f"# omitted: {o.path} {o.tokens:,} {o.reason}" for o in result.omitted]
+    lines += [
+        f"# omitted: {o.path} {o.tokens:,} {o.reason}" for o in result.omitted[:OMITTED_SHOWN]
+    ]
+    if len(result.omitted) > OMITTED_SHOWN:
+        lines.append(f"# and {len(result.omitted) - OMITTED_SHOWN} more omitted")
     return "\n".join(lines + [f"# next: {hint}" for hint in result.next])
 
 

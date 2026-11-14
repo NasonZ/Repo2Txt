@@ -44,6 +44,7 @@ Keep = Callable[[str, int], bool]
 _URL_PREFIX = re.compile(r"^(?:https?://)?(?:www\.)?github\.com/")
 _OWNER = re.compile(r"^[A-Za-z0-9][\w-]*$")
 _REPO = re.compile(r"^[\w.-]+$")
+_REF = re.compile(r"^[\w][\w./+-]*$")
 
 
 class SourceError(Problem):
@@ -109,21 +110,30 @@ def load(
             return False
         return is_candidate(path, size, max_file_size)
 
+    if ref is not None and (not _REF.match(ref) or ".." in ref):
+        raise SourceError(f"{ref!r} is not a branch, tag or commit name.")
+    where = [] if source == "." else ["-r", source]
+    for flag, patterns in (("-i", include), ("-e", exclude)):
+        where += [word for pattern in patterns for word in (flag, pattern)]
+
     errors: list[str] = []
     if Path(source).is_dir():
         root = Path(source).resolve()
         name, pairs = root.name or str(root), local_files(root, keep, errors)
     elif parsed := parse_github_ref(source):
         archive, ref = download_tarball(*parsed, ref, transport)
-        name, pairs = parsed[1], tar_files(archive, keep)
+        name, pairs, where = parsed[1], tar_files(archive, keep), [*where, "--ref", ref]
     else:
         raise SourceError(f"{source!r} is not a directory, a GitHub URL or an owner/repo name.")
 
     files = {}
-    for path, data in pairs:
-        if (text := decode(data)) is not None:
-            files[path] = RepoFile(path, text)
-    return Repository(name, source, ref, dict(sorted(files.items())), errors)
+    try:
+        for path, data in pairs:
+            if (text := decode(data)) is not None:
+                files[path] = RepoFile(path, text)
+    except tarfile.TarError as exc:
+        raise SourceError(f"GitHub did not return a readable archive for {source}: {exc}") from exc
+    return Repository(name, where, ref, dict(sorted(files.items())), errors)
 
 
 def local_files(root: Path, keep: Keep, errors: list[str]) -> Iterator[tuple[str, bytes]]:
@@ -143,12 +153,29 @@ def local_files(root: Path, keep: Keep, errors: list[str]) -> Iterator[tuple[str
 
 def _git_paths(root: Path) -> list[str] | None:
     """Tracked files and untracked files that are not ignored, or None outside a work tree."""
-    command = ["git", "-C", str(root), "ls-files", "-z", "--cached", "--others"]
+    # The directory may not be ours: do not let its git config run a program.
+    safe = ["-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null"]
+    listing = ["ls-files", "-z", "--cached", "--others", "--exclude-standard"]
     try:
-        result = subprocess.run([*command, "--exclude-standard"], capture_output=True, check=True)
+        result = subprocess.run(
+            ["git", *safe, "-C", str(root), *listing],
+            capture_output=True,
+            check=True,
+            env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"},
+        )
     except (OSError, subprocess.CalledProcessError):
         return None
-    return [p for p in result.stdout.decode("utf-8", "surrogateescape").split("\0") if p]
+    # A name that is not valid UTF-8 cannot be printed or passed back; leave such files out.
+    names = result.stdout.split(b"\0")
+    return [n.decode() for n in names if n and _is_utf8(n)]
+
+
+def _is_utf8(name: bytes) -> bool:
+    try:
+        name.decode()
+    except UnicodeDecodeError:
+        return False
+    return True
 
 
 def _walk_paths(root: Path) -> list[str]:

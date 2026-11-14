@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 import click
-from dotenv import load_dotenv
+from dotenv import find_dotenv, load_dotenv
 
 from . import render
 from .api import METHODS, repo_map, repo_pack, repo_select
@@ -44,6 +44,8 @@ class Group(click.Group):
             sys.exit(130)
         except Problem as exc:
             _fail(str(exc), exc.next, "--json" in args, status=1)
+        except Exception as exc:  # Anything else is still reported, not dumped as a traceback.
+            _fail(f"{type(exc).__name__}: {exc}", [], "--json" in args, status=1)
 
 
 def _fail(message: str, hints: list[str], as_json: bool, status: int) -> None:
@@ -81,7 +83,7 @@ def cli():
     repo2txt pack src/api.py docs/      the contents of named files, fitted to a budget
     repo2txt select "auth" | repo2txt pack --stdin -b 16k
     """
-    load_dotenv()
+    load_dotenv(find_dotenv(usecwd=True))
 
 
 @cli.command()
@@ -137,13 +139,18 @@ def pack(repo, items, from_stdin, budget, fmt, output, as_json):
     if from_stdin:
         lines = (line.split("\t")[0].strip() for line in sys.stdin)
         items += tuple(line for line in lines if line and not line.startswith("#"))
-    result = repo_pack(repo, items, budget)
-    document = render.pack_json(result) if as_json else render.pack_text(result, fmt)
+        if not items:
+            raise Problem("Nothing to pack: standard input named no files.")
+
+    def document(result):
+        return render.pack_json(result) if as_json else render.pack_text(result, fmt)
+
+    result = repo_pack(repo, items, budget, document)
     if output:
-        Path(output).write_text(document, encoding="utf-8")
+        Path(output).write_text(document(result), encoding="utf-8")
         click.echo(render.pack_summary(result))
     else:
-        click.echo(document, nl=False)
+        click.echo(document(result), nl=False)
 
 
 @cli.command()
@@ -151,7 +158,10 @@ def pack(repo, items, from_stdin, budget, fmt, output, as_json):
 @click.option("-b", "--budget", type=Budget(), default="100k", show_default=True)
 def chat(repo, budget):
     """Choose files by talking to the model named by LLM_MODEL."""
-    from .chat import run_chat
+    try:
+        from .chat import run_chat
+    except ImportError as exc:
+        raise Problem("The chat needs the rich package.", ["pip install 'repo2txt[llm]'"]) from exc
     from .llm import LLMSettings, openai_complete
     from .selector import Selector
 

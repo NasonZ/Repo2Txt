@@ -17,7 +17,7 @@ from .models import Problem
 class Call:
     id: str
     name: str
-    arguments: dict[str, Any]
+    arguments: dict[str, Any] | None  # None when the model sent something that is not JSON
 
 
 @dataclass
@@ -64,7 +64,12 @@ class LLMSettings:
 
 def openai_complete(settings: LLMSettings) -> Complete:
     """A `Complete` for any endpoint that speaks the OpenAI chat completions API."""
-    from openai import OpenAI
+    try:
+        from openai import OpenAI
+    except ImportError as exc:
+        raise ConfigError(
+            "Choosing with a model needs the openai package.", ["pip install 'repo2txt[llm]'"]
+        ) from exc
 
     client = OpenAI(api_key=settings.api_key, base_url=settings.base_url)
 
@@ -77,7 +82,9 @@ def openai_complete(settings: LLMSettings) -> Complete:
             try:
                 arguments = json.loads(call.function.arguments or "{}")
             except json.JSONDecodeError:
-                arguments = {}
+                arguments = None
+            if not isinstance(arguments, dict):
+                arguments = None
             calls.append(Call(call.id, call.function.name, arguments))
         usage = response.usage
         return Reply(

@@ -33,8 +33,16 @@ def _remote(repo: str, ref: str | None) -> Repository:
 
 
 def _load(repo: str, ref: str | None) -> Repository:
-    """Local directories are read afresh; a GitHub download is reused within the session."""
-    return load(repo) if Path(repo).is_dir() else _remote(repo, ref)
+    """Local directories are read afresh; a GitHub download is reused within the session.
+
+    A client can ask for any path, so only the directory the server was started in, and what
+    lies under it, may be read.
+    """
+    if not Path(repo).is_dir():
+        return _remote(repo, ref)
+    if not Path(repo).resolve().is_relative_to(Path.cwd().resolve()):
+        raise Problem(f"{repo} is outside the directory this server was started in.")
+    return load(repo)
 
 
 def _tool(function):
@@ -87,4 +95,4 @@ def _repo_pack(
     An item is a path, a directory, a glob, or `path:10-80` for a line range. Files that do
     not fit are listed with their token cost, never cut: ask for a line range or a larger budget.
     """
-    return render.pack_text(repo_pack(_load(repo, ref), items, budget))
+    return render.pack_text(repo_pack(_load(repo, ref), items, budget, render.pack_text))

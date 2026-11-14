@@ -63,6 +63,18 @@ def main() -> None:
             f"Model usage: {sum(i for i, _ in spent):,} input and "
             f"{sum(o for _, o in spent):,} output tokens over {len(spent)} selections."
         )
+    covered = {
+        frozenset(r["task"] for r in rows if (r["method"], r["budget"]) == cell)
+        for cell in {(r["method"], r["budget"]) for r in rows}
+    }
+    if len(covered) > 1:
+        print("Warning: the rows do not all cover the same tasks, so they are not comparable.")
+    versions = {(r["method"], r["commit"], r["model"]) for r in rows}
+    if len(versions) > len({r["method"] for r in rows}):
+        print(
+            "Note: a method was run at more than one commit or model: "
+            + ", ".join(sorted(f"{m}@{c}" for m, c, _ in versions))
+        )
     errors = [r for r in rows if r["error"]]
     if errors:
         print(f"{len(errors)} selections failed and scored zero, e.g. {errors[0]['error'][:120]}")
