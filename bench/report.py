@@ -57,7 +57,12 @@ def main() -> None:
         f"Gold files excluded by repo2txt's filters, counted as misses: "
         f"{sum(r['gold_filtered'] for r in tasks)}."
     )
-    spent = [(r["input_tokens"], r["output_tokens"]) for r in rows if r["input_tokens"]]
+    # llm-fill reuses llm's call, so count each call once.
+    spent = [
+        (r["input_tokens"], r["output_tokens"])
+        for r in rows
+        if r["input_tokens"] and r["method"] != "llm-fill"
+    ]
     if spent:
         print(
             f"Model usage: {sum(i for i, _ in spent):,} input and "
