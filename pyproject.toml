@@ -41,7 +41,7 @@ Repository = "https://github.com/NasonZ/Repo2Txt"
 Issues = "https://github.com/NasonZ/Repo2Txt/issues"
 
 [dependency-groups]
-dev = ["pytest>=8.3", "ruff>=0.11"]
+dev = ["pytest>=8.3", "ruff>=0.11", "mcp>=2.3"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

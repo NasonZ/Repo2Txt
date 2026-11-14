@@ -38,6 +38,8 @@ def bm25(repo: Repository, query: str) -> list[tuple[str, float]]:
     lengths: dict[str, int] = {}
     counts: dict[str, Counter[str]] = {}
     for path, file in repo.files.items():
+        if not file.text.strip():
+            continue  # An empty file can match by its path alone, and tells the reader nothing.
         tokens = terms(file.text)
         lengths[path] = len(tokens)
         found = Counter(t for t in tokens if t in wanted)
@@ -47,8 +49,8 @@ def bm25(repo: Repository, query: str) -> list[tuple[str, float]]:
         if found:
             counts[path] = found
 
-    total = len(repo.files)
-    average = sum(lengths.values()) / total or 1
+    total = len(lengths)
+    average = sum(lengths.values()) / (total or 1) or 1
     containing = Counter(term for found in counts.values() for term in found)
     idf = {t: math.log(1 + (total - n + 0.5) / (n + 0.5)) for t, n in containing.items()}
 
