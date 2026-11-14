@@ -158,8 +158,8 @@ because the needed files often do not fit whole.
 
 The needed files are sufficient, not minimal, so precision is understated. Whether the
 models had seen these repositories and fixes in training was not measured.
-`bench/results/README.md` lists what was tried and dropped, and `python -m bench.run`
-reproduces the rows.
+[docs/report-2026-11-14.md](docs/report-2026-11-14.md) is the full account: each experiment,
+what was tried and dropped, and the limits. `python -m bench.run` reproduces the rows.
 
 ## How it is put together
 
