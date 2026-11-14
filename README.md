@@ -1,379 +1,168 @@
 # Repo2Txt
 
-Repo2Txt turns a repository into bounded, token-aware context for LLMs.
+Choose what an LLM or a coding agent reads from a repository, within a token budget.
 
-It reads a local directory or GitHub repository, lets you choose the files that matter, counts the tokens, and writes a single context file in Markdown or XML. File selection can be manual or assisted by an LLM.
+A model reading code has a fixed amount of room, and most of a repository is not about the
+question in hand. Repo2Txt answers three questions, each with a cap on how much it prints:
+what is in this repository and how big is each part, which files matter for this question,
+and what is in these files.
 
-The useful abstraction is not "repo to text". It is context selection under a budget.
+```console
+$ repo2txt map -r pallets/click --max-tokens 300
+# click ref=main: 169 files, 327,719 tokens (o200k_base)
+.github/ 3,438 (10 files)
+docs/ 61,020 (42 files)
+examples/ 8,716 (36 files)
+src/ 102,393 (18 files)
+tests/ 130,218 (59 files)
+CHANGES.md 19,683
+LICENSE.txt 296
+README.md 403
+pyproject.toml 1,552
+# depth 1 of 5: deeper directories are collapsed
+# next: repo2txt map tests/ -r pallets/click
+# next: repo2txt map src/ -r pallets/click
+# next: repo2txt map docs/ -r pallets/click
 
-## Why this exists
+$ repo2txt select "ParamType convert fail" -r pallets/click -b 30k
+# click: 18 files, 29,987 of 30,000 tokens, from 97 candidates (bm25)
+src/click/types.py	10953
+docs/parameter-types.md	2269
+examples/validation/validation.py	326
+...
 
-LLM work on codebases is usually limited by context, not by access to files. A repository can have hundreds or thousands of files. The useful question is rarely "can I dump the repo?" It is:
-
-- Which files should be in context for this task?
-- How many tokens will they consume?
-- What can be removed without losing the evidence needed for the next step?
-- How do I keep the selection explicit enough to inspect and revise?
-
-Repo2Txt makes that selection visible. It builds a file tree, tracks token counts, validates selected paths, and produces an output file that can be given to another model.
-
-This also makes it a natural base for agent context management. Current agent workflows increasingly need tools that can load, retain, and discard context rather than blindly append more text. Repo2Txt exposes those primitives today through a CLI; an MCP server is the obvious next interface.
-
-## Current status
-
-Implemented:
-
-- Local repository input
-- GitHub repository input
-- Manual interactive file selection
-- AI-assisted file selection with tool calls
-- Token counting and token budgets
-- Markdown and XML output
-- JSON token export
-- Rich terminal UI themes
-- Undo during AI-assisted selection
-
-Not implemented yet:
-
-- MCP server interface
-- Read/write code-editing tools
-- Custom output templates
-
-## Installation
-
-Repo2Txt requires Python 3.9 or newer. Python 3.11+ is recommended.
-
-With `uv`:
-
-```bash
-git clone https://github.com/NasonZ/repo2txt.git
-cd repo2txt
-uv sync
-source .venv/bin/activate
+$ repo2txt select "ParamType convert fail" -r pallets/click -b 12k | repo2txt pack --stdin -r pallets/click -b 12k
 ```
 
-With `pip`:
+Output from 14 November 2026; the last command prints the files themselves.
+
+## Install
 
 ```bash
-git clone https://github.com/NasonZ/repo2txt.git
-cd repo2txt
-pip install -e .
+uv tool install git+https://github.com/NasonZ/Repo2Txt
 ```
 
-For development:
+Python 3.11 or later. `map`, `select` and `pack` need nothing more. Choosing with a model
+needs the `llm` extra and the MCP server the `mcp` extra:
+`uv tool install "repo2txt[llm,mcp] @ git+https://github.com/NasonZ/Repo2Txt"`.
+
+## Commands
+
+`map`, `select` and `pack` take `-r/--repo` (a directory, a GitHub URL or `owner/repo`; default `.`),
+`--ref` (a GitHub branch, tag or commit), `-i/--include` and `-e/--exclude` globs, and
+`--json`. Budgets are written `8000`, `8k` or `1.5m`. Output goes to stdout.
+
+**`repo2txt map [DIRECTORY]`** prints the tree with token counts. If the whole tree does not
+fit `--max-tokens` (default 4k) it is shown to the deepest level that does, and directories
+below that are one line each with their totals. `--depth N` fixes the level.
+
+**`repo2txt select QUERY`** ranks files for a question and lists those that fit `-b/--budget`
+(default 32k), best first, as `path<TAB>tokens`. It prints no contents. The count is what the
+file takes when packed, its heading included, and 60 tokens of the budget are left for the
+packed document's own heading, so a selection always packs within the same budget. `--method bm25` (the
+default) scores paths, identifiers and text and needs no model. `--method llm` gives a model
+the tree and lets it choose; see below.
+
+**`repo2txt pack [ITEMS...]`** prints the contents of files as Markdown (or `-f xml`). An item
+is a path, a directory, a glob, or `path:10-80` for a line range. Files are included whole in
+the order given until `-b/--budget` is full. The budget covers everything printed, headings
+and notes included. What does not fit is listed with its token cost and is never cut. With
+`-f xml` the files sit inside XML-style tags and their contents are left exactly as they
+are, so the result is for a model to read, not for an XML parser. With no items the whole repository is packed, smallest files first.
+`--stdin` reads items from a pipe, and fails if the pipe names none; `-o FILE` writes the
+document and prints a summary.
+
+**`repo2txt chat`** is a terminal conversation with a model that builds a selection:
+`/generate [FILE]`, `/undo`, `/clear`, `/budget N`, `/quit`.
+
+**`repo2txt mcp`** serves `repo_map`, `repo_select` and `repo_pack` over MCP (below).
+
+Failures print `error: <what went wrong>` and, where there is one, `next: <a command to try>`.
+Exit status is 0 on success, 1 when the work failed and 2 when the command was misused.
+
+### What is read
+
+In a git work tree the file list comes from `git ls-files`: tracked files, and untracked files
+that git does not ignore. A GitHub repository is read from its tarball in two requests, so
+public repositories need no token; set `GITHUB_TOKEN` for private ones. Hidden files and
+directories (except `.github` and `.gitlab`), `node_modules`, lockfiles, minified files,
+source maps, binary formats, files with a null byte in their first 8 KB and files over 1 MB
+are left out.
+Symbolic links are not followed.
+
+Tokens are counted with tiktoken's `o200k_base`. Other tokenisers differ, usually by under a
+fifth, so treat counts as estimates and leave headroom.
+
+## For coding agents
+
+**Skill.** `skills/repo2txt/SKILL.md` follows the [Agent Skills](https://agentskills.io)
+format, which Claude Code, Codex and pi all read. Copy the directory to `~/.claude/skills/`
+for Claude Code or `~/.agents/skills/` for Codex and pi.
+
+**MCP.** Install with the extra and register the server:
 
 ```bash
-uv sync --dev
-source .venv/bin/activate
-pytest
+uv tool install "repo2txt[mcp] @ git+https://github.com/NasonZ/Repo2Txt"
+claude mcp add repo2txt -- repo2txt mcp
 ```
 
-## Quick start
+The three tools are read-only and return the same text as the commands. The server reads
+local directories only inside the directory it was started in, and any GitHub repository. Their default cap is
+4,000 tokens, under the size at which Claude Code warns (10,000) and pi truncates (20 KB).
 
-Select files manually from a local repository:
+The command line is the main interface: a skill costs an agent a few hundred tokens of
+context, and tool definitions cost more.
+
+## Choosing with a model
 
 ```bash
-repo2txt /path/to/repo
+export LLM_MODEL=<model name>
+export LLM_API_KEY=...                        # not needed if LLM_BASE_URL is a local server
+export LLM_BASE_URL=http://localhost:8080/v1  # optional; any OpenAI-compatible endpoint
+
+repo2txt select "how are sessions invalidated on logout" --method llm -b 30k
 ```
 
-Select files manually from GitHub:
+The model sees the tree with token counts, collapsed to about 6,000 tokens, and has three
+tools: replace the selection, adjust it, and list a collapsed directory. It cannot read file
+contents. Every path is checked against the repository, and a change that would exceed the
+budget is refused and explained, so the result always fits. It gets five rounds of tool calls
+per request. These variables can also go in a `.env` file.
 
-```bash
-repo2txt https://github.com/owner/repo
-```
-
-Ask an LLM to select files for a task:
-
-```bash
-repo2txt /path/to/repo \
-  --ai-select \
-  --ai-query "Show me the authentication flow, including routes, models, middleware, and tests" \
-  --token-budget 50000
-```
-
-Write XML instead of Markdown:
-
-```bash
-repo2txt /path/to/repo --format xml
-```
-
-Export token data as JSON as well:
-
-```bash
-repo2txt /path/to/repo --json
-```
-
-Exclude large or irrelevant directories:
-
-```bash
-repo2txt /path/to/repo --exclude-dirs "datasets,logs,cache"
-```
-
-## Selection modes
-
-### Manual selection
-
-Manual mode lets you walk the repository tree and choose files or directories yourself.
-
-Commands during traversal:
+## How it is put together
 
 ```text
-1-5,7,9-12  select item ranges
-a            select all items in the current directory
-s            skip the current directory
-b            go back
-q            quit
+sources.py     a directory or a GitHub tarball, as (path, bytes) pairs, filtered
+models.py      Repository and RepoFile; tokens are counted per file on first use
+selection.py   Selection, a set of paths held within a budget; fit() for ranked lists
+tree.py        the tree with totals, and its entries down to a depth
+rank.py        BM25 over paths, identifiers and text
+api.py         repo_map, repo_select, repo_pack: everything else calls only these
+render.py      text and JSON that fit a cap; hints are dropped before items are
+llm.py         Complete, the one function type through which a model is called
+selector.py    the model's prompt, tools and loop over a Selection
+cli.py  chat.py  mcp_server.py   three ways in
 ```
 
-Use this mode when you know the codebase or want full control over what enters context.
-
-### AI-assisted selection
-
-AI-assisted mode gives the model the repository tree, token counts, README content, and a small set of file-selection tools. The model does not edit files. It only proposes and adjusts a context set.
-
-The two core tools are:
-
-```text
-select_files       replace the current selection with a new set of files
-adjust_selection  add or remove files from the current selection
-```
-
-Every selected path is validated against the real repository. If the model invents a path, uses the wrong prefix, or selects a file that does not exist, Repo2Txt returns structured feedback and keeps the session alive.
-
-Example:
-
-```bash
-repo2txt ./service \
-  --ai-select \
-  --prompt-style meta-reasoning \
-  --token-budget 25000
-```
-
-Then ask:
-
-```text
-How does payment processing work? Include the main components and error handling.
-```
-
-The agent can select files such as:
-
-```text
-src/payments/processor.py
-src/payments/models.py
-src/payments/exceptions.py
-src/api/payment_routes.py
-tests/test_payments.py
-config/payment_config.py
-```
-
-Repo2Txt reports the token impact immediately, so the selection can be revised before generating output.
-
-## AI chat commands
-
-During AI-assisted selection:
-
-```text
-/help                 show available commands
-/generate [format]    create output: markdown, xml, json, or all
-/save [filename]      save chat history
-/clear                reset conversation and selection
-/undo                 undo last selection action
-/toggle streaming     enable or disable streaming responses
-/toggle thinking      enable or disable thinking mode for Qwen models
-/toggle prompt        cycle prompt style
-/toggle budget <N>    set token budget
-/debug                toggle debug mode
-/debug state          show current state
-```
-
-In AI mode, output is generated from inside the chat with `/generate`. In manual mode, output is written after selection completes.
-
-## Command-line options
-
-```text
-repo2txt [REPO] [OPTIONS]
-
-Core options:
-  --output-dir, -o DIR     Output directory. Default: output
-  --format, -f FORMAT      Output format: markdown or xml. Default: markdown
-  --theme, -t THEME        Terminal theme: manhattan, green, matrix, sunset
-  --max-file-size SIZE     Maximum file size in bytes. Default: 1MB
-  --exclude-dirs DIRS      Comma-separated additional directories to exclude
-  --no-tokens              Disable token counting
-  --json                   Export token data as JSON
-
-AI options:
-  --ai-select              Enable AI-assisted selection
-  --ai-query QUERY         Initial query for AI selection
-  --token-budget N         Token budget for AI selection. Default: 100000
-  --prompt-style STYLE     standard, meta-reasoning, or xml
-  --debug                  Show prompts, tool calls, and debug panels
-```
-
-## Configuration
-
-Create a `.env` file when using GitHub private repositories or AI-assisted selection:
-
-```bash
-# LLM configuration
-LLM_PROVIDER=openai        # openai, ollama, llamacpp
-LLM_MODEL=gpt-4-turbo
-LLM_API_KEY=...
-LLM_BASE_URL=              # optional custom endpoint
-
-# GitHub access
-GITHUB_TOKEN=...           # required for private repos; useful for rate limits
-
-# UI
-DEFAULT_THEME=manhattan    # manhattan, matrix, green, sunset
-```
-
-For local models:
-
-```bash
-# Ollama
-export LLM_PROVIDER=ollama
-export LLM_BASE_URL=http://localhost:11434
-export LLM_MODEL=qwen3:32b
-
-# llama.cpp server
-export LLM_PROVIDER=llamacpp
-export LLM_BASE_URL=http://localhost:8080
-export LLM_MODEL=llama3.2:3b
-```
-
-## Output
-
-Repo2Txt creates a timestamped output directory:
-
-```text
-output/
-└── RepoName_20240315_143022/
-    ├── RepoName_analysis.md       # selected files plus instructions
-    ├── RepoName_token_report.txt  # token tree, totals, largest files
-    └── RepoName_tokens.json       # optional, with --json
-```
-
-The main analysis file includes:
-
-- repository name and branch
-- analysis instructions
-- selected repository structure
-- total selected files
-- total selected tokens
-- README content
-- selected file contents
-- errors encountered during processing, if any
-
-Markdown output uses fenced blocks with file paths:
-
-````markdown
-```src/example.py
-print("hello")
-```
-````
-
-XML output uses explicit file elements:
-
-```xml
-<file path="src/example.py">
-print("hello")
-</file>
-```
-
-## Architecture
-
-Repo2Txt has three layers.
-
-### Repository adapters
-
-Adapters normalise different repository sources behind one interface.
-
-- `LocalAdapter` reads directly from the filesystem and counts tokens on demand.
-- `GitHubAdapter` works through the GitHub API and pre-caches repository structure to avoid repeated network calls.
-
-The two adapters expose the same behaviour to the rest of the system, but they should not be collapsed into one implementation. Filesystem traversal and GitHub API traversal have different performance constraints.
-
-### Selection state
-
-Selection state records:
-
-- available files
-- selected files
-- token count per file
-- total selected tokens
-- token budget
-- previous state for undo
-
-This is the centre of the AI-assisted workflow. The LLM can request changes, but the state manager validates them.
-
-### Output pipeline
-
-Both manual and AI-assisted selection converge on the same pipeline:
-
-```text
-repository source
-  -> file tree
-  -> selected paths
-  -> file contents
-  -> token report
-  -> markdown/xml/json output
-```
-
-That convergence is deliberate. Selection is separate from formatting.
-
-## Design notes
-
-### Context is a managed resource
-
-Long context windows do not remove the need to choose. More context can add cost, latency, and distractors. Repo2Txt keeps token pressure visible while selection is happening, not after the output is already built.
-
-### Search and generation are separate jobs
-
-The AI-assisted selector does not answer the user's code question. It selects the evidence needed to answer it. That boundary matters: one component curates context, another reasons over it.
-
-### Invalid AI actions are data
-
-LLMs make path mistakes. Repo2Txt treats those mistakes as recoverable tool errors. Invalid paths are returned with explicit feedback, allowing the model to correct its next action instead of silently producing a bad context set.
+`llm.Complete` takes a conversation and tool schemas and returns text and tool calls. The
+default calls an OpenAI-compatible endpoint; any other client can be passed in its place.
 
 ## Development
 
-Run tests:
-
 ```bash
-pytest
+uv run pytest
+uv run ruff check && uv run ruff format --check
 ```
 
-Run a focused test file:
+git is run with `core.fsmonitor` and hooks disabled, so a repository's own configuration
+cannot start a program when it is read.
 
-```bash
-pytest tests/test_ai_components.py
-```
-
-Run quality checks:
-
-```bash
-black src/ tests/
-ruff check src/ tests/
-mypy src/
-```
-
-Build the package:
-
-```bash
-python -m build
-```
-
-Useful implementation docs:
-
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
-- [`docs/SYSTEM_DESIGN.md`](docs/SYSTEM_DESIGN.md)
-- [`CLAUDE.md`](CLAUDE.md)
-
-## Acknowledgements
-
-Repo2Txt builds on the original idea from [Doriandarko/RepoToTextForLLMs](https://github.com/Doriandarko/RepoToTextForLLMs).
+The tests run the commands on a small repository built in a temporary directory, read GitHub
+through a stand-in transport that serves a generated tarball, drive the selector with scripted
+model replies, and call the MCP server through the SDK's in-memory client. One further test
+reads a real repository and needs network access and `GITHUB_TOKEN`. No test calls a model.
 
 ## Licence
 
-MIT Licence. See [`LICENSE`](LICENSE).
+MIT. See [LICENSE](LICENSE). The project began as a fork of
+[RepoToTextForLLMs](https://github.com/Doriandarko/RepoToTextForLLMs) by Pietro Schirano.

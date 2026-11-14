@@ -1,201 +1,180 @@
-"""Command-line interface for repo2txt."""
-import os
+"""The command line: map, select, pack, chat and mcp."""
+
+import functools
+import json
 import sys
-import logging
 from pathlib import Path
 
 import click
-from .core.models import Config
-from .core.analyzer import RepositoryAnalyzer
-from .utils.console import ConsoleManager, StatusType, get_console
-from .utils.console_base import get_alternating_theme
+from dotenv import find_dotenv, load_dotenv
+
+from . import render
+from .api import METHODS, repo_map, repo_pack, repo_select
+from .models import Problem
+from .sources import load
+from .tokens import parse_budget
 
 
-def setup_logging(debug: bool) -> None:
-    """Configure logging based on debug flag."""
-    # Always use standard minimal logging
-    # The debug flag is for UI debug mode, not logging debug
-    level = logging.WARNING
-    format_string = '[%(levelname)s] %(message)s'
-    
-    logging.basicConfig(
-        level=level,
-        format=format_string,
-        handlers=[logging.StreamHandler(sys.stderr)]
+class Budget(click.ParamType):
+    """A token count such as 8000, 8k or 1.5m."""
+
+    name = "tokens"
+
+    def convert(self, value, param, ctx):
+        try:
+            return parse_budget(value)
+        except ValueError as exc:
+            self.fail(str(exc), param, ctx)
+
+
+class Group(click.Group):
+    """Reports every failure the same way: what went wrong, then a command to try.
+
+    Exit status is 0 on success, 1 when the work failed and 2 when the command was misused.
+    """
+
+    def main(self, args=None, **extra):
+        args = sys.argv[1:] if args is None else list(args)
+        try:
+            super().main(args=args, standalone_mode=False, **extra)
+        except click.UsageError as exc:
+            command = exc.ctx.command_path if exc.ctx else "repo2txt"
+            _fail(exc.format_message(), [f"{command} --help"], "--json" in args, status=2)
+        except click.Abort:
+            sys.exit(130)
+        except Problem as exc:
+            _fail(str(exc), exc.next, "--json" in args, status=1)
+        except Exception as exc:  # Anything else is still reported, not dumped as a traceback.
+            _fail(f"{type(exc).__name__}: {exc}", [], "--json" in args, status=1)
+
+
+def _fail(message: str, hints: list[str], as_json: bool, status: int) -> None:
+    if as_json:
+        click.echo(json.dumps({"error": {"message": message, "next": hints}}))
+    else:
+        click.echo("\n".join([f"error: {message}", *(f"next: {hint}" for hint in hints)]))
+    sys.exit(status)
+
+
+def repository(command):
+    """Options every command shares for naming and filtering the repository."""
+
+    @click.option(
+        "-r", "--repo", default=".", help="Directory, GitHub URL or owner/repo.  [default: .]"
     )
-    
-    # Reduce noise from external libraries
-    logging.getLogger("urllib3").setLevel(logging.WARNING)
-    logging.getLogger("requests").setLevel(logging.WARNING)
-    logging.getLogger("httpx").setLevel(logging.WARNING)
-    logging.getLogger("httpcore").setLevel(logging.WARNING)
-    logging.getLogger("openai").setLevel(logging.WARNING)
+    @click.option("--ref", help="GitHub branch, tag or commit. Defaults to the default branch.")
+    @click.option("-i", "--include", multiple=True, help="Only files matching this glob.")
+    @click.option("-e", "--exclude", multiple=True, help="Leave out files matching this glob.")
+    @functools.wraps(command)
+    def wrapper(repo, ref, include, exclude, **kwargs):
+        return command(load(repo, ref=ref, include=include, exclude=exclude), **kwargs)
+
+    return wrapper
 
 
-def print_banner(console: ConsoleManager) -> None:
-    """Print retro terminal banner."""
-    banner = """
-╔══════════════════════════════════════════════════════════════════════╗
-║                                                                      ║
-║  ██████╗ ███████╗██████╗  ██████╗ ██████╗ ████████╗██╗  ██╗████████╗ ║
-║  ██╔══██╗██╔════╝██╔══██╗██╔═══██╗╚════██╗╚══██╔══╝╚██╗██╔╝╚══██╔══╝ ║
-║  ██████╔╝█████╗  ██████╔╝██║   ██║ █████╔╝   ██║    ╚███╔╝    ██║    ║
-║  ██╔══██╗██╔══╝  ██╔═══╝ ██║   ██║██╔═══╝    ██║    ██╔██╗    ██║    ║
-║  ██║  ██║███████╗██║     ╚██████╔╝███████╗   ██║   ██╔╝ ██╗   ██║    ║
-║  ╚═╝  ╚═╝╚══════╝╚═╝      ╚═════╝ ╚══════╝   ╚═╝   ╚═╝  ╚═╝   ╚═╝    ║
-║                                                                      ║
-║                  REPOSITORY ANALYSIS TERMINAL v2.0                   ║
-╚══════════════════════════════════════════════════════════════════════╝
-"""
+@click.group(cls=Group)
+@click.version_option(package_name="repo2txt")
+def cli():
+    """Choose what an LLM or a coding agent reads from a repository, within a token budget.
 
-    console.print(banner, style="highlight")
-
-
-@click.command()
-@click.argument('repo', required=True)
-@click.option('--output-dir', '-o', default='output', help='Output directory for results')
-@click.option('--max-file-size', '-m', type=int, help='Maximum file size in bytes (default: 1MB)')
-@click.option('--no-tokens', is_flag=True, help='Disable token counting')
-@click.option('--format', '-f', type=click.Choice(['xml', 'markdown']), default='markdown', 
-              help='Output format for file contents')
-@click.option('--json', 'export_json', is_flag=True, help='Export token data as JSON')
-@click.option('--theme', '-t', type=click.Choice(['manhattan', 'green', 'matrix', 'sunset']), 
-              default=get_alternating_theme(), help='Terminal color theme')
-@click.option('--ai-select', is_flag=True, help='Use AI to help select files via conversation')
-@click.option('--ai-query', help='Query for AI file selection (use with --ai-select)')
-@click.option('--token-budget', type=int, default=100000, help='Token budget for AI selection')
-@click.option('--debug', is_flag=True, help='Enable debug mode for AI selection (shows system prompts, tool calls)')
-@click.option('--prompt-style', type=click.Choice(['standard', 'meta-reasoning', 'xml']), default='standard',
-              help='System prompt style for AI selection (standard, meta-reasoning, or xml)')
-@click.option('--exclude-dirs', help='Comma-separated list of additional directories to exclude (e.g., "datasets,logs,temp")')
-@click.version_option()
-def main(repo: str, output_dir: str, max_file_size: int, no_tokens: bool, 
-         format: str, export_json: bool, theme: str, ai_select: bool,
-         ai_query: str, token_budget: int, debug: bool, prompt_style: str, exclude_dirs: str) -> None:
+    \b
+    repo2txt map                        the tree, with token counts
+    repo2txt select "rate limiting"     files ranked for a question, fitted to a budget
+    repo2txt pack src/api.py docs/      the contents of named files, fitted to a budget
+    repo2txt select "auth" | repo2txt pack --stdin -b 16k
     """
-    Analyze a GitHub repository or local codebase.
-    
-    REPO can be:
-    - GitHub URL: https://github.com/owner/repo
-    - GitHub shorthand: owner/repo  
-    - Local directory path: /path/to/repo or .
-    
-    Examples:
-    
-        repo2txt https://github.com/django/django
-        
-        repo2txt astropy/astropy
-        
-        repo2txt . --no-tokens
-        
-        repo2txt /path/to/project --format xml --json
+    load_dotenv(find_dotenv(usecwd=True))
 
-        repo2txt https://github.com/openai/openai-python --token-budget 20000 --ai-select
-        
-        repo2txt . --exclude-dirs "datasets,logs,temp,cache"
-        
 
+@cli.command()
+@click.argument("directory", default="")
+@repository
+@click.option("--max-tokens", type=Budget(), default="4k", show_default=True, help="Output cap.")
+@click.option("--depth", type=click.IntRange(min=1), help="Levels to show. Default: what fits.")
+@click.option("--json", "as_json", is_flag=True, help="Print JSON.")
+def map(repo, directory, max_tokens, depth, as_json):
+    """Show the tree under DIRECTORY with token counts.
+
+    Directories deeper than fits in --max-tokens are collapsed to one line with their totals.
     """
-    # Create console manager with selected theme
-    console = ConsoleManager(theme=theme)
-    
-    setup_logging(debug)
-    
-    # Print banner
-    print_banner(console)
-    
+    result = repo_map(repo, directory, max_tokens, depth)
+    click.echo(
+        render.as_json(result, max_tokens) if as_json else render.map_text(result, max_tokens)
+    )
+
+
+@cli.command()
+@click.argument("query")
+@repository
+@click.option("-b", "--budget", type=Budget(), default="32k", show_default=True)
+@click.option("--method", type=click.Choice(list(METHODS)), default="bm25", show_default=True)
+@click.option("--max-tokens", type=Budget(), default="4k", show_default=True, help="Output cap.")
+@click.option("--json", "as_json", is_flag=True, help="Print JSON.")
+def select(repo, query, budget, method, max_tokens, as_json):
+    """Rank files for QUERY and list those that fit the budget, best first.
+
+    Prints paths and token counts, not contents: pipe the result to `pack --stdin`.
+    bm25 needs no model. llm asks the model named by LLM_MODEL to choose from the tree.
+    """
+    result = repo_select(repo, query, budget, method)
+    click.echo(
+        render.as_json(result, max_tokens) if as_json else render.select_text(result, max_tokens)
+    )
+
+
+@cli.command()
+@click.argument("items", nargs=-1)
+@repository
+@click.option("--stdin", "from_stdin", is_flag=True, help="Also read items from standard input.")
+@click.option("-b", "--budget", type=Budget(), help="Token budget. Default: no limit.")
+@click.option("-f", "--format", "fmt", type=click.Choice(["markdown", "xml"]), default="markdown")
+@click.option("-o", "--output", type=click.Path(dir_okay=False), help="Write the document here.")
+@click.option("--json", "as_json", is_flag=True, help="Print JSON.")
+def pack(repo, items, from_stdin, budget, fmt, output, as_json):
+    """Print the contents of ITEMS, fitted whole to the budget in the order given.
+
+    An item is a path, a directory, a glob, or path:10-80 for a line range. With no items the
+    whole repository is packed, smallest files first. Files that do not fit are listed, not cut.
+    """
+    if from_stdin:
+        lines = (line.split("\t")[0].strip() for line in sys.stdin)
+        items += tuple(line for line in lines if line and not line.startswith("#"))
+        if not items:
+            raise Problem("Nothing to pack: standard input named no files.")
+
+    def document(result):
+        return render.pack_json(result) if as_json else render.pack_text(result, fmt)
+
+    result = repo_pack(repo, items, budget, document)
+    if output:
+        Path(output).write_text(document(result), encoding="utf-8")
+        click.echo(render.pack_summary(result))
+    else:
+        click.echo(document(result), nl=False)
+
+
+@cli.command()
+@repository
+@click.option("-b", "--budget", type=Budget(), default="100k", show_default=True)
+def chat(repo, budget):
+    """Choose files by talking to the model named by LLM_MODEL."""
     try:
-        # Initialize
-        console.print("\n[dim]INITIALIZING SYSTEM...[/dim]")
-        console.print("[dim]LOADING CONFIGURATION...[/dim]")
-        
-        # Create configuration
-        config = Config(
-            github_token=os.environ.get('GITHUB_TOKEN', ''),
-            enable_token_counting=not no_tokens,
-            output_format=format,
-            ai_select=ai_select,
-            ai_query=ai_query,
-            token_budget=token_budget,
-            export_json=export_json,
-            debug=debug,
-            prompt_style=prompt_style
-        )
-        
-        # Add any additional excluded directories from command line
-        if exclude_dirs:
-            additional_dirs = set(dir.strip() for dir in exclude_dirs.split(',') if dir.strip())
-            config.excluded_dirs.update(additional_dirs)
-            if additional_dirs:
-                console.print(f"[dim]ADDITIONAL EXCLUDED DIRS: {', '.join(sorted(additional_dirs))}[/dim]")
-        
-        if max_file_size:
-            config.max_file_size = max_file_size
-        
-        # Create analyzer
-        console.print("[dim]STARTING ANALYZER...[/dim]")
-        analyzer = RepositoryAnalyzer(config, console)
-        
-        # Analyze repository
-        console.print(f"\n[highlight]> ACQUIRED REPO:[/highlight] [path]{repo}[/path]")
-        console.print("[info]> COMMENCING ANALYSIS...[/info]\n")
-        
-        result = analyzer.analyze(repo)
-        
-        # Only auto-save for non-AI mode
-        if not config.ai_select:
-            # Save results
-            console.print("\n[info]> WRITING OUTPUT FILES...[/info]")
-            output_files = analyzer.save_results(result, output_dir)
-        else:
-            output_files = {}
-        
-        # Display results
-        console.print("\n" + "═" * 60)
-        console.print("[success]ANALYSIS COMPLETE[/success]")
-        console.print("═" * 60)
-        
-        console.print(f"[info]REPOSITORY:[/info] [path]{result.repo_name}[/path]")
-        if result.branch:
-            console.print(f"[info]BRANCH:[/info] [path]{result.branch}[/path]")
-        console.print(f"[info]FILES ANALYZED:[/info] [number]{result.total_files}[/number]")
-        
-        if config.enable_token_counting:
-            console.print(f"[info]TOTAL TOKENS:[/info] [number]{result.total_tokens:,}[/number]")
-        
-        # Output files
-        if output_files:
-            console.print("\n[info]OUTPUT FILES:[/info]")
-            for file_type, file_path in output_files.items():
-                rel_path = os.path.relpath(file_path)
-                console.print(f"  [dim]>[/dim] {file_type.upper()}: [path]{rel_path}[/path]")
-        elif config.ai_select:
-            console.print("\n[info]Use /generate command in AI chat to create output files[/info]")
-        
-        # Warnings
-        if result.has_errors():
-            console.print(f"\n[warning]WARNINGS DETECTED:[/warning] [number]{len(result.errors)}[/number]")
-            if debug:
-                for error in result.errors[:5]:
-                    console.print(f"  [dim]>[/dim] {error}")
-                if len(result.errors) > 5:
-                    console.print(f"  [dim]... +{len(result.errors) - 5} more[/dim]")
-        
-        console.print("\n[dim]SYSTEM SHUTDOWN[/dim]")
-        console.print("═" * 60)
-    
-    except KeyboardInterrupt:
-        console.print("\n[error]> PROCESS TERMINATED BY USER[/error]")
-        console.print("[dim]SYSTEM SHUTDOWN[/dim]")
-        sys.exit(1)
-    
-    except Exception as e:
-        console.print(f"\n[error]> CRITICAL ERROR:[/error] {str(e)}")
-        if debug:
-            console.print_exception()
-        console.print("[dim]SYSTEM SHUTDOWN[/dim]")
-        sys.exit(1)
+        from .chat import run_chat
+    except ImportError as exc:
+        raise Problem("The chat needs the rich package.", ["pip install 'repo2txt[llm]'"]) from exc
+    from .llm import LLMSettings, openai_complete
+    from .selector import Selector
+
+    run_chat(Selector(repo, budget, openai_complete(LLMSettings.from_env())))
 
 
-if __name__ == '__main__':
-    main()
+@cli.command()
+def mcp():
+    """Serve map, select and pack to an MCP client over standard input and output."""
+    try:
+        from .mcp_server import server
+    except ImportError as exc:
+        raise Problem(
+            "The MCP server needs the mcp package.", ["pip install 'repo2txt[mcp]'"]
+        ) from exc
+    server.run()
