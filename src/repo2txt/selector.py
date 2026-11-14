@@ -79,9 +79,10 @@ covers the request, reply in one or two sentences saying what you chose and why.
 """
 
 EXPLORE = """
-File names mislead, so check before you choose. Use search to find where a function, class, \
-setting or error message from the request actually lives, and outline to see what a file \
-defines before spending budget on it.
+Make a first selection in your first round, from the candidates and the tree, so that there \
+is always something to return. File names mislead, so then check it: use search to find \
+where a function, class, setting or error message from the request actually lives, and \
+outline to see what a file defines, and adjust the selection with what you learn.
 """
 
 CANDIDATES = """\
@@ -196,7 +197,9 @@ class Selector:
         self.messages.append({"role": "user", "content": request})
         for round_number in range(MAX_ROUNDS + 1):
             # After the last round the model must answer in words.
-            tools = self.tools if round_number < MAX_ROUNDS else []
+            left = MAX_ROUNDS - round_number
+            # The last round of tool calls is for selecting, so exploring cannot use it up.
+            tools = self.tools[:2] if left == 1 and self.explore else self.tools if left else []
             reply = self.complete(self._conversation(), tools)
             self.input_tokens += reply.input_tokens
             self.output_tokens += reply.output_tokens
@@ -204,9 +207,12 @@ class Selector:
             if not reply.calls:
                 return reply.text
             for call in reply.calls:
-                self.messages.append(
-                    {"role": "tool", "tool_call_id": call.id, "content": self._run(call)}
-                )
+                result = self._run(call)
+                if self.explore and left == 3:
+                    result += (
+                        "\n[Two rounds left. Settle the selection now; the last is for it alone.]"
+                    )
+                self.messages.append({"role": "tool", "tool_call_id": call.id, "content": result})
         return reply.text
 
     def _conversation(self) -> list[dict[str, Any]]:
@@ -282,10 +288,11 @@ class Selector:
             regex = re.compile(pattern)
         except re.error:
             regex = re.compile(re.escape(pattern))
-        prefix = path.strip("/") + "/" if path.strip("/") else ""
+        where = path.strip().removeprefix("./").strip("/")
+        prefix = where + "/" if where else ""
         found = []
         for file_path, file in self.repo.files.items():
-            if not file_path.startswith(prefix):
+            if file_path != where and not file_path.startswith(prefix):
                 continue
             lines = [
                 (n, line) for n, line in enumerate(file.text.split("\n"), 1) if regex.search(line)
@@ -293,7 +300,7 @@ class Selector:
             if lines:
                 found.append((len(lines), file_path, lines[:2]))
         if not found:
-            return f"No file under {prefix or 'the repository'} matches {pattern!r}."
+            return f"Nothing in {where or 'the repository'} matches {pattern!r}."
         found.sort(key=lambda item: (-item[0], item[1]))
         out = []
         for count, file_path, lines in found[:SEARCH_FILES]:

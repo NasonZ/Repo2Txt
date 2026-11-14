@@ -71,6 +71,9 @@ VARIANTS: dict[str, dict] = {
     "llm-v1": {"shortlist": 30},
     "llm-v2": {"shortlist": 30, "recall": True},
     "llm-v3": {"shortlist": 30, "recall": True, "explore": True},
+    # v3 again after its transcripts showed a search bug and rounds running out.
+    "llm-v3b": {"shortlist": 30, "recall": True, "explore": True},
+    "llm-v2n": {"recall": True},  # v2 without the shortlist
 }
 RUNS = 3  # for the "x3" methods, which merge several independent selections
 
