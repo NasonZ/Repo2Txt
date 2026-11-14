@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import re
+import time
 from collections import defaultdict
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -27,12 +28,22 @@ class Task:
     language: str
     source: str  # which benchmark the task came from
     query: str  # the issue text, and the only thing a method is given
-    gold: list[str]  # files a person judged necessary to resolve the issue
+    spans: list[list]  # [file, first line, last line] a person judged necessary
+
+    @property
+    def gold(self) -> list[str]:
+        return sorted({file for file, _, _ in self.spans})
+
+    @property
+    def split(self) -> str:
+        """Which set the task belongs to. Whole repositories are held out, not single tasks."""
+        digest = hashlib.sha256(f"split:{self.repo}".encode()).digest()
+        return "test" if digest[0] % 10 < 3 else "dev"
 
 
 def all_tasks() -> list[Task]:
     """Every task of the 500-task subset, downloaded once."""
-    path = CACHE / "tasks.jsonl"
+    path = CACHE / "tasks-v2.jsonl"
     if not path.exists():
         CACHE.mkdir(parents=True, exist_ok=True)
         tasks, offset = [], 0
@@ -45,7 +56,11 @@ def all_tasks() -> list[Task]:
                     "offset": offset,
                     "length": 100,
                 }
-                response = client.get(ROWS, params=params)
+                for attempt in range(5):  # The dataset server fails now and then.
+                    response = client.get(ROWS, params=params)
+                    if response.status_code < 500:
+                        break
+                    time.sleep(2 * (attempt + 1))
                 response.raise_for_status()
                 rows = response.json()["rows"]
                 if not rows:
@@ -62,7 +77,10 @@ def all_tasks() -> list[Task]:
                             row["language"],
                             row["source"],
                             row["problem_statement"],
-                            sorted({CONTAINER.sub("", span["file"]) for span in spans}),
+                            sorted(
+                                [CONTAINER.sub("", s["file"]), s["start_line"], s["end_line"]]
+                                for s in spans
+                            ),
                         )
                     )
                 offset += len(rows)
@@ -70,15 +88,16 @@ def all_tasks() -> list[Task]:
     return [Task(**json.loads(line)) for line in path.read_text().splitlines()]
 
 
-def sample(count: int, seed: str = "repo2txt") -> list[Task]:
-    """A fixed sample that takes one task from each repository in turn."""
+def sample(count: int, split: str = "dev", seed: str = "repo2txt") -> list[Task]:
+    """A fixed sample of one split that takes one task from each repository in turn."""
 
     def key(text: str) -> str:
         return hashlib.sha256(f"{seed}:{text}".encode()).hexdigest()
 
     by_repo: dict[str, list[Task]] = defaultdict(list)
     for task in all_tasks():
-        by_repo[task.repo].append(task)
+        if task.split == split:
+            by_repo[task.repo].append(task)
     queues = [
         sorted(tasks, key=lambda t: key(t.id))
         for _, tasks in sorted(by_repo.items(), key=lambda item: key(item[0]))

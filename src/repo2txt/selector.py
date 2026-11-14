@@ -152,8 +152,7 @@ class Selector:
         return " ".join(parts)
 
     def _list_dir(self, path: str = "") -> str:
-        root = tree.build_tree({p: f.tokens for p, f in self.repo.files.items()})
-        node = tree.find(root, path)
+        node = tree.find(tree.of(self.repo), path)
         if node is None or not node.is_dir:
             return f"There is no directory {path!r}. Use a directory path from the tree."
         items = tree.entries(node, 1)

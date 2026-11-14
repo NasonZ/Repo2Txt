@@ -89,9 +89,7 @@ def repo_map(
     are collapsed to one line with their totals.
     """
     _require_files(repo)
-    repo.count()
-    root = tree.build_tree({p: f.tokens for p, f in repo.files.items()})
-    node = tree.find(root, prefix)
+    node = tree.find(tree.of(repo), prefix)
     if node is None or not node.is_dir:
         raise Problem(f"No directory {prefix!r} in {repo.name}.", [_cmd("map", repo)])
 

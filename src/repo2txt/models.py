@@ -46,6 +46,8 @@ class Repository:
     ref: str | None
     files: dict[str, RepoFile]
     errors: list[str] = field(default_factory=list)
+    # Work derived from the files and worth doing once: the tree, the last ranking.
+    cache: dict = field(default_factory=dict, repr=False, compare=False)
 
     def tokens(self, paths: Iterable[str] | None = None) -> int:
         """Total content tokens of `paths`, or of every file."""
