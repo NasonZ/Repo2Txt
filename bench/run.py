@@ -32,11 +32,6 @@ from .tasks import CACHE, Task, sample
 Method = Callable[[Repository, Task, Gold, int], tuple[list[str], int, int]]
 
 
-# Files scoring below this share of the best score are left out rather than used as padding.
-CUT = 0.25
-_llm_paths: dict[tuple, tuple[list[str], int, int]] = {}
-
-
 def bm25_plain(repo: Repository, task: Task, gold: Gold, budget: int) -> tuple[list[str], int, int]:
     """BM25 alone, as a reference point for the signals added to it."""
     return [path for path, _ in rank.bm25(repo, task.query, boosts=False)], 0, 0
@@ -44,12 +39,6 @@ def bm25_plain(repo: Repository, task: Task, gold: Gold, budget: int) -> tuple[l
 
 def bm25(repo: Repository, task: Task, gold: Gold, budget: int) -> tuple[list[str], int, int]:
     return [path for path, _ in rank.bm25(repo, task.query)], 0, 0
-
-
-def bm25_cut(repo: Repository, task: Task, gold: Gold, budget: int) -> tuple[list[str], int, int]:
-    ranked = rank.bm25(repo, task.query)
-    floor = CUT * ranked[0][1] if ranked else 0
-    return [path for path, score in ranked if score >= floor], 0, 0
 
 
 def smallest(repo: Repository, task: Task, gold: Gold, budget: int) -> tuple[list[str], int, int]:
@@ -65,72 +54,19 @@ def oracle(repo: Repository, task: Task, gold: Gold, budget: int) -> tuple[list[
     return sorted(readable, key=lambda p: repo.files[p].tokens), 0, 0
 
 
-# Settings of the model selector under test. "llm" is the selector as first shipped.
-VARIANTS: dict[str, dict] = {
-    "llm": {},
-    "llm-v1": {"shortlist": 30},
-    "llm-v2": {"shortlist": 30, "recall": True},
-    "llm-v3": {"shortlist": 30, "recall": True, "explore": True},
-    # v3 again after its transcripts showed a search bug and rounds running out.
-    "llm-v3b": {"shortlist": 30, "recall": True, "explore": True},
-    "llm-v2n": {"recall": True},  # v2 without the shortlist
-}
-RUNS = 3  # for the "x3" methods, which merge several independent selections
-
-
-def _select(variant: str, repo: Repository, task: Task, budget: int, run: int = 0):
-    key = (variant, task.id, budget, run)
-    if key not in _llm_paths:
-        selector = Selector(
-            repo, budget, openai_complete(LLMSettings.from_env()), **VARIANTS[variant]
-        )
-        selector.ask(task.query)
-        _llm_paths[key] = (selector.selection.paths, selector.input_tokens, selector.output_tokens)
-    return _llm_paths[key]
-
-
-def model(variant: str) -> Method:
-    return lambda repo, task, gold, budget: _select(variant, repo, task, budget)
-
-
-def filled(method: Method) -> Method:
-    """The model's choice first, then ranked files in whatever budget it left unused."""
-
-    def run(repo: Repository, task: Task, gold: Gold, budget: int):
-        chosen, tokens_in, tokens_out = method(repo, task, gold, budget)
-        rest, _, _ = bm25_cut(repo, task, gold, budget)
-        return list(dict.fromkeys([*chosen, *rest])), tokens_in, tokens_out
-
-    return run
-
-
-def merged(variant: str) -> Method:
-    """Several independent selections, merged: files chosen by more runs come first."""
-
-    def run(repo: Repository, task: Task, gold: Gold, budget: int):
-        runs = [_select(variant, repo, task, budget, n) for n in range(RUNS)]
-        votes: dict[str, list[int]] = {}
-        for paths, _, _ in runs:
-            for position, path in enumerate(paths):
-                votes.setdefault(path, []).append(position)
-        order = sorted(votes, key=lambda p: (-len(votes[p]), sum(votes[p]) / len(votes[p]), p))
-        return order, sum(r[1] for r in runs), sum(r[2] for r in runs)
-
-    return run
+def llm(repo: Repository, task: Task, gold: Gold, budget: int) -> tuple[list[str], int, int]:
+    selector = Selector(repo, budget, openai_complete(LLMSettings.from_env()))
+    selector.ask(task.query)
+    return selector.selection.paths, selector.input_tokens, selector.output_tokens
 
 
 RUNNERS: dict[str, Method] = {
     "smallest": smallest,
     "bm25-plain": bm25_plain,
     "bm25": bm25,
-    "bm25-cut": bm25_cut,
     "oracle": oracle,
+    "llm": llm,
 }
-for _name in VARIANTS:
-    RUNNERS[_name] = model(_name)
-    RUNNERS[f"{_name}-fill"] = filled(model(_name))
-    RUNNERS[f"{_name}x3"] = merged(_name)
-    RUNNERS[f"{_name}x3-fill"] = filled(merged(_name))
 
 
 def repository(task: Task) -> tuple[Repository, set[str]]:

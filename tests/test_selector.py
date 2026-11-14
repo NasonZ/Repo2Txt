@@ -122,27 +122,3 @@ def test_bad_tool_arguments_change_nothing_and_always_get_a_reply():
     calls = [m for m in selector.messages if m["role"] == "assistant" and m.get("tool_calls")]
     assert len(results(script)) == len(calls) == 5
     assert all("Nothing was changed" in text or "no tool" in text for text in results(script)[1:])
-
-
-def test_exploring_cannot_use_up_the_round_kept_for_selecting():
-    files = {"src/app.py": RepoFile("src/app.py", "def handler():\n    return 1\n")}
-    repo = Repository("demo", [], None, files)
-    offered = []
-
-    def complete(messages, tools):
-        offered.append([tool["function"]["name"] for tool in tools])
-        if "search" in offered[-1]:
-            arguments = {"pattern": "def handler", "path": "src/app.py"}
-            return Reply("", [Call(f"c{len(offered)}", "search", arguments)])
-        if tools:
-            return Reply("", [Call(f"c{len(offered)}", "select_files", {"paths": ["src/app.py"]})])
-        return Reply("Done.")
-
-    selector = Selector(repo, 1000, complete, explore=True)
-    selector.ask("where is the handler?")
-
-    assert offered[-2] == ["select_files", "adjust_selection"]
-    assert selector.selection.paths == ["src/app.py"]
-    found = [m["content"] for m in selector.messages if m["role"] == "tool"]
-    assert found[0].startswith("src/app.py (1 matching lines")
-    assert any("Two rounds left" in text for text in found)

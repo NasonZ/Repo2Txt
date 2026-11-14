@@ -1,7 +1,6 @@
-"""Choosing files with a model: a prompt, a few tools, a short loop."""
+"""Choosing files with a model: a prompt, three tools, a short loop."""
 
 import json
-import re
 from collections.abc import Callable
 from typing import Any
 
@@ -17,40 +16,11 @@ MAX_ROUNDS = 5
 # Tokens of the system prompt given to the repository tree. Deeper directories are collapsed
 # and reached with list_dir.
 TREE_TOKENS = 6000
+# How many lexically ranked files are shown beside each request, as leads.
+SHORTLIST = 30
 LIST_LIMIT = 200
-SEARCH_FILES = 15
-OUTLINE_LINES = 60
-_DECLARATION = re.compile(
-    r"^\s*(?:(?:export|default|public|private|protected|static|async|abstract|final|pub)\s+)*"
-    r"(?:def|class|function|fn|func|struct|interface|trait|impl|type|enum|module|namespace)\b"
-)
 
 SYSTEM = """\
-You choose which files of the repository `{name}` someone should read to deal with a request.
-You cannot read the files; you see their paths and sizes in tokens.
-
-Budget: {budget:,} tokens. A selection that would exceed it is refused and left unchanged.
-Selected so far: {selected}
-
-Prefer the files where the behaviour in question is implemented, then what they depend on to \
-be understood. Leave out tests, fixtures and documentation unless the request is about them. \
-Give paths exactly as listed, most important first.
-
-Tools:
-- select_files(paths): replace the whole selection.
-- adjust_selection(add, remove): change part of it.
-- list_dir(path): list a directory that is shown collapsed below.
-
-When the selection is right, reply in one or two sentences saying what you chose and why.
-
-The repository follows. Indentation shows nesting, so a file's path is its directory names
-and its own name joined with `/`, as in `src/app/main.py`. A directory line reads
-`name/ tokens (files)`; directories shown without their contents are collapsed.
-
-{tree}
-"""
-
-SYSTEM_RECALL = """\
 <repository name="{name}">
 {tree}
 </repository>
@@ -69,20 +39,13 @@ reader needs to follow them: the definitions they rely on, the code that calls t
 any configuration or schema they read. Add the closest tests last, if there is room. A \
 selection that uses a small part of the budget has usually left something out, so aim to \
 use most of it, and keep going after the first plausible files.
-{explore}
+
 Budget: {budget:,} tokens. A change that would exceed it is refused and leaves the selection \
 as it was. Selected so far: {selected}
 
 You have {rounds} rounds of tool calls. Calls that do not depend on each other can go in \
 the same round. Give paths exactly as they appear, most important first. When the selection \
 covers the request, reply in one or two sentences saying what you chose and why.
-"""
-
-EXPLORE = """
-Make a first selection in your first round, from the candidates and the tree, so that there \
-is always something to return. File names mislead, so then check it: use search to find \
-where a function, class, setting or error message from the request actually lives, and \
-outline to see what a file defines, and adjust the selection with what you learn.
 """
 
 CANDIDATES = """\
@@ -119,58 +82,15 @@ SCHEMAS = [
         },
     },
 ]
-EXPLORE_SCHEMAS = [
-    {
-        "name": "search",
-        "description": (
-            "Search file contents with a regular expression. Returns the files with the most "
-            "matching lines, each with its first matches and their line numbers."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "pattern": {"type": "string", "description": "A regular expression."},
-                "path": {"type": "string", "description": "Only search under this directory."},
-            },
-            "required": ["pattern"],
-        },
-    },
-    {
-        "name": "outline",
-        "description": "Show what a file defines: its classes and functions with line numbers.",
-        "parameters": {
-            "type": "object",
-            "properties": {"path": {"type": "string"}},
-            "required": ["path"],
-        },
-    },
-]
-
-
-def _tools(schemas: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [{"type": "function", "function": schema} for schema in schemas]
+TOOLS = [{"type": "function", "function": schema} for schema in SCHEMAS]
 
 
 class Selector:
     """A conversation with a model that ends in a `Selection` within budget."""
 
-    def __init__(
-        self,
-        repo: Repository,
-        budget: int,
-        complete: Complete,
-        shortlist: int = 0,
-        recall: bool = False,
-        explore: bool = False,
-    ):
-        """`shortlist` puts that many lexically ranked files beside each request. `recall`
-        uses the prompt that favours completeness and reports budget use after every call.
-        `explore` adds tools to search contents and outline a file.
-        """
+    def __init__(self, repo: Repository, budget: int, complete: Complete):
         self.repo = repo
         self.complete = complete
-        self.shortlist, self.recall, self.explore = shortlist, recall, explore
-        self.tools = _tools(SCHEMAS + (EXPLORE_SCHEMAS if explore else []))
         self.selection = Selection(repo, budget)
         self.messages: list[dict[str, Any]] = []
         self.input_tokens = 0
@@ -182,24 +102,19 @@ class Selector:
                 self.selection.adjust(_paths(add), _paths(remove))
             ),
             "list_dir": self._list_dir,
-            "search": self._search,
-            "outline": self._outline,
         }
 
     def ask(self, request: str) -> str:
         """Add a request to the conversation, let the model work, and return its reply."""
-        if self.shortlist:
-            self.repo.count(
-                leads := [p for p, _ in rank.bm25(self.repo, request)[: self.shortlist]]
-            )
+        leads = [path for path, _ in rank.bm25(self.repo, request)[:SHORTLIST]]
+        if leads:
+            self.repo.count(leads)
             rows = "\n".join(f"{p} {self.repo.files[p].tokens:,}" for p in leads)
-            request = CANDIDATES.format(rows=rows, request=request) if leads else request
+            request = CANDIDATES.format(rows=rows, request=request)
         self.messages.append({"role": "user", "content": request})
         for round_number in range(MAX_ROUNDS + 1):
             # After the last round the model must answer in words.
-            left = MAX_ROUNDS - round_number
-            # The last round of tool calls is for selecting, so exploring cannot use it up.
-            tools = self.tools[:2] if left == 1 and self.explore else self.tools if left else []
+            tools = TOOLS if round_number < MAX_ROUNDS else []
             reply = self.complete(self._conversation(), tools)
             self.input_tokens += reply.input_tokens
             self.output_tokens += reply.output_tokens
@@ -207,12 +122,9 @@ class Selector:
             if not reply.calls:
                 return reply.text
             for call in reply.calls:
-                result = self._run(call)
-                if self.explore and left == 3:
-                    result += (
-                        "\n[Two rounds left. Settle the selection now; the last is for it alone.]"
-                    )
-                self.messages.append({"role": "tool", "tool_call_id": call.id, "content": result})
+                self.messages.append(
+                    {"role": "tool", "tool_call_id": call.id, "content": self._run(call)}
+                )
         return reply.text
 
     def _conversation(self) -> list[dict[str, Any]]:
@@ -222,12 +134,11 @@ class Selector:
             selected = f"{len(selection.paths)} files, {selection.total:,} tokens: " + ", ".join(
                 selection.paths
             )
-        system = (SYSTEM_RECALL if self.recall else SYSTEM).format(
+        system = SYSTEM.format(
             name=self.repo.name,
             budget=selection.budget,
             selected=selected,
             tree=self._tree,
-            explore=EXPLORE if self.explore else "",
             rounds=MAX_ROUNDS,
         )
         return [{"role": "system", "content": system}, *self.messages]
@@ -243,8 +154,7 @@ class Selector:
             result = handler(**call.arguments)
         except (TypeError, ValueError) as exc:
             return f"Bad arguments for {call.name}: {exc}. Nothing was changed."
-        if not self.recall:
-            return result
+        # Every reply says where the budget stands, so the model can see what room is left.
         selection = self.selection
         left = selection.budget - selection.total
         used = f"{len(selection.paths)} files, {selection.total:,} of {selection.budget:,} tokens"
@@ -252,16 +162,14 @@ class Selector:
 
     def _report(self, change: Change) -> str:
         """Tell the model what its change did, in terms it can act on."""
-        selection = self.selection
-        state = f"{len(selection.paths)} files, {selection.total:,} of {selection.budget:,} tokens"
         parts = []
         if not change.applied:
             parts.append(
                 f"Refused: that would be {change.over_by:,} tokens over the budget. The "
-                f"selection is unchanged ({state}). Choose fewer or smaller files."
+                "selection is unchanged. Choose fewer or smaller files."
             )
         else:
-            parts.append(f"Done. Selection: {state}.")
+            parts.append("Done.")
         if change.unknown:
             parts.append(
                 "These paths are not in the repository or the selection and were ignored: "
@@ -282,49 +190,6 @@ class Selector:
         if len(items) > LIST_LIMIT:
             lines.append(f"... {len(items) - LIST_LIMIT} more; list a subdirectory instead.")
         return "\n".join(lines)
-
-    def _search(self, pattern: str, path: str = "") -> str:
-        try:
-            regex = re.compile(pattern)
-        except re.error:
-            regex = re.compile(re.escape(pattern))
-        where = path.strip().removeprefix("./").strip("/")
-        prefix = where + "/" if where else ""
-        found = []
-        for file_path, file in self.repo.files.items():
-            if file_path != where and not file_path.startswith(prefix):
-                continue
-            lines = [
-                (n, line) for n, line in enumerate(file.text.split("\n"), 1) if regex.search(line)
-            ]
-            if lines:
-                found.append((len(lines), file_path, lines[:2]))
-        if not found:
-            return f"Nothing in {where or 'the repository'} matches {pattern!r}."
-        found.sort(key=lambda item: (-item[0], item[1]))
-        out = []
-        for count, file_path, lines in found[:SEARCH_FILES]:
-            tokens = self.repo.files[file_path].tokens
-            out.append(f"{file_path} ({count} matching lines, {tokens:,} tokens)")
-            out += [f"  {n}: {line.strip()[:160]}" for n, line in lines]
-        if len(found) > SEARCH_FILES:
-            out.append(
-                f"... and {len(found) - SEARCH_FILES} more files. Narrow the pattern or path."
-            )
-        return "\n".join(out)
-
-    def _outline(self, path: str) -> str:
-        file = self.repo.files.get(path.strip().removeprefix("./"))
-        if file is None:
-            return f"There is no file {path!r}. Use a path from the tree, a search or list_dir."
-        lines = file.text.split("\n")
-        declared = [(n, line) for n, line in enumerate(lines, 1) if _DECLARATION.match(line)]
-        shown = declared[:OUTLINE_LINES] or list(enumerate(lines[:15], 1))
-        out = [f"{file.path}: {len(lines)} lines, {file.tokens:,} tokens"]
-        out += [f"  {n}: {line.rstrip()[:160]}" for n, line in shown]
-        if len(declared) > OUTLINE_LINES:
-            out.append(f"... and {len(declared) - OUTLINE_LINES} more definitions.")
-        return "\n".join(out)
 
 
 def _paths(value: Any) -> list[str]:
