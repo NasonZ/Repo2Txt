@@ -9,7 +9,6 @@ from .models import Repository
 K1, B = 1.2, 0.75
 # A query word found in a file's path counts as this many occurrences in its text.
 PATH_WEIGHT = 5
-# A file named in the query is lifted above every file that is not.
 # A file that defines an identifier the query names scores this much more per identifier.
 DEFINITION_BOOST = 1.5
 # Tests and prose describe behaviour; the code that has it ranks above them.
