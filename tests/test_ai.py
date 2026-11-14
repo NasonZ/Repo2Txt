@@ -1,7 +1,13 @@
+import json
+from types import SimpleNamespace
+
 import pytest
 
+from repo2txt.ai import FileSelectorAgent
 from repo2txt.ai.llm import ConfigError, LLMSettings
 from repo2txt.ai.state import StateManager
+from repo2txt.core.models import RepoFile, Repository
+from repo2txt.ui import UI
 
 TOKENS = {"a.py": 100, "b.py": 250, "docs/c.md": 40}
 
@@ -45,3 +51,53 @@ def test_llm_settings_need_a_key_only_for_the_default_endpoint(monkeypatch):
     monkeypatch.setenv("LLM_BASE_URL", "http://localhost:8080/v1")
     settings = LLMSettings.from_env()
     assert (settings.model, settings.base_url) == ("some-model", "http://localhost:8080/v1")
+
+
+class ScriptedLLM:
+    """Stands in for the model endpoint: replies with the next scripted message."""
+
+    def __init__(self, *replies):
+        self.replies = list(replies)
+        self.seen = []
+
+    def create_completion(self, messages, tools=None, stream=False):
+        self.seen.append([dict(m) for m in messages])
+        content, paths = self.replies.pop(0)
+        calls = None
+        if paths is not None:
+            arguments = json.dumps({"reasoning": "r", "paths": paths})
+            function = SimpleNamespace(name="select_files", arguments=arguments)
+            calls = [SimpleNamespace(id=f"call_{len(self.seen)}", function=function)]
+        message = SimpleNamespace(content=content, tool_calls=calls)
+        return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+
+
+def agent_for(llm, budget):
+    files = {"a.py": RepoFile("a.py", "a", 60), "b.py": RepoFile("b.py", "b", 60)}
+    agent = FileSelectorAgent(
+        Repository("demo", None, files), LLMSettings("model", "key"), budget, UI()
+    )
+    agent.llm, agent.use_streaming = llm, False
+    return agent
+
+
+def test_the_model_can_correct_a_selection_that_was_refused():
+    llm = ScriptedLLM(
+        ("", ["a.py", "b.py"]),  # 120 tokens: over the budget of 100
+        ("", ["src/a.py"]),  # does not exist
+        ("", ["a.py"]),
+        ("Selected a.py.", None),
+    )
+
+    selected = agent_for(llm, budget=100).run_once("where is a?")
+
+    assert selected == ["a.py"]
+    refusals = [m["content"] for m in llm.seen[-1] if m["role"] == "tool"]
+    assert "over the budget" in refusals[0] and "do not exist" not in refusals[0]
+    assert "src/a.py" in refusals[1]
+
+
+def test_a_selection_never_exceeds_the_budget_even_if_the_model_insists():
+    llm = ScriptedLLM(*[("", ["a.py", "b.py"])] * 5, ("I give up.", None))
+
+    assert agent_for(llm, budget=100).run_once("everything") == []

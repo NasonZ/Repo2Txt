@@ -1,7 +1,10 @@
 """The non-AI path end to end: a directory in, a context file out."""
 
 import json
+import shutil
+import subprocess
 
+import pytest
 from click.testing import CliRunner
 
 from repo2txt.cli import main
@@ -82,3 +85,18 @@ def test_a_budget_no_file_fits_is_an_error(fixture_repo, tmp_path):
 
     assert result.exit_code == 1
     assert not out.exists()
+
+
+@pytest.mark.skipif(not shutil.which("git"), reason="needs git")
+def test_files_ignored_by_git_are_left_out(fixture_repo, tmp_path):
+    (fixture_repo / ".gitignore").write_text("*.log\nscratch/\n")
+    (fixture_repo / "debug.log").write_text("noise\n")
+    (fixture_repo / "scratch").mkdir()
+    (fixture_repo / "scratch" / "notes.md").write_text("draft\n")
+    (fixture_repo / "src" / "untracked.py").write_text("NEW = 1\n")
+    shutil.rmtree(fixture_repo / ".git")
+    subprocess.run(["git", "init", "-q", str(fixture_repo)], check=True)
+
+    _, data = run(fixture_repo, tmp_path / "out")
+
+    assert set(data["files"]) == TEXT_FILES | {"src/untracked.py"}

@@ -23,7 +23,11 @@ class FileSelectionState:
 
 
 class StateManager:
-    """Applies the model's selection changes, rejecting paths that do not exist."""
+    """Applies the model's selection changes.
+
+    Paths that do not exist are rejected, and so is any change that would leave the selection
+    over the token budget, so a selection made here always fits.
+    """
 
     def __init__(self, file_tokens: dict[str, int], token_budget: int):
         self.state = FileSelectionState(token_budget=token_budget)
@@ -35,6 +39,23 @@ class StateManager:
         state.previous_tokens = state.total_tokens_selected
         state.selected_files = sorted(paths)
         state.total_tokens_selected = sum(self.file_tokens[p] for p in state.selected_files)
+
+    def _over_budget(self, paths: set[str]) -> str | None:
+        """Explain why `paths` cannot become the selection, or return None if it fits.
+
+        A change that shrinks a selection already over budget (the budget was lowered) is allowed.
+        """
+        state = self.state
+        total = self._tokens(paths)
+        if total <= state.token_budget or total < state.total_tokens_selected:
+            return None
+        largest = sorted(paths, key=lambda p: -self.file_tokens[p])[:5]
+        listed = ", ".join(f"{p} ({self.file_tokens[p]:,})" for p in largest)
+        return (
+            f"ERROR: selection not changed. {len(paths)} files total {total:,} tokens, "
+            f"{total - state.token_budget:,} over the budget of {state.token_budget:,}. "
+            f"Largest: {listed}. Choose fewer or smaller files and try again."
+        )
 
     def _result(self, feedback: str, **extra: Any) -> dict[str, Any]:
         state = self.state
@@ -59,6 +80,8 @@ class StateManager:
         """Replace the whole selection."""
         valid = {p.strip() for p in paths if p.strip() in self.file_tokens}
         invalid = [p for p in paths if p.strip() not in self.file_tokens]
+        if refusal := self._over_budget(valid):
+            return self._result(refusal, invalid_paths=invalid, valid_paths=[])
         self._set_selection(valid)
         if invalid and not valid:
             feedback = (
@@ -96,6 +119,8 @@ class StateManager:
             elif path not in current:
                 current.add(path)
                 added.append(path)
+        if refusal := self._over_budget(current):
+            return self._result(refusal, added_files=[], removed_files=[], not_found=problems)
         self._set_selection(current)
 
         parts = []
@@ -112,7 +137,7 @@ class StateManager:
             ". ".join(parts), added_files=added, removed_files=removed, not_found=problems
         )
 
-    def _tokens(self, paths: list[str]) -> int:
+    def _tokens(self, paths: list[str] | set[str]) -> int:
         return sum(self.file_tokens[p] for p in paths)
 
     def get_current_selection_summary(self) -> str:

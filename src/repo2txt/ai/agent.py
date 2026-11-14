@@ -14,6 +14,9 @@ from .prompts import PromptGenerator
 from .state import StateManager
 from .tools import ToolCall, ToolExecutor, create_file_selection_tools, parse_openai_tool_calls
 
+# Rounds of tool calls the model gets per message, so it can correct a rejected selection.
+MAX_TOOL_ROUNDS = 5
+
 
 class FileSelectorAgent:
     def __init__(
@@ -109,13 +112,14 @@ class FileSelectorAgent:
         return self.selected_files
 
     def respond(self) -> None:
-        """Get the model's reply to the conversation, run any tool calls, and get its follow-up."""
-        self.refresh_system_prompt()
-        content, calls = self._complete(with_tools=True)
-        self.messages.add_assistant(content, calls)
-        if not calls:
-            return
-        self.messages.add_tool_results([self._run_tool(call) for call in calls])
+        """Get the model's reply, running its tool calls until it answers without one."""
+        for _ in range(MAX_TOOL_ROUNDS):
+            self.refresh_system_prompt()
+            content, calls = self._complete(with_tools=True)
+            self.messages.add_assistant(content, calls)
+            if not calls:
+                return
+            self.messages.add_tool_results([self._run_tool(call) for call in calls])
         self.refresh_system_prompt()
         content, _ = self._complete(with_tools=False)
         self.messages.add_assistant(content)

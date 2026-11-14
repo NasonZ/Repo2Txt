@@ -39,13 +39,15 @@ In the Markdown output each file is a fenced block whose info string is its path
 
 Hidden files and directories (except `.github` and `.gitlab`), directories such as `node_modules`, `venv`, `dist` and `build`, lockfiles, minified files, source maps, files with binary extensions, files that contain null bytes, and files larger than `--max-file-size` (1 MiB by default) are skipped. Symbolic links are not followed.
 
+In a git work tree, files ignored by git are left out as well: the file list comes from `git ls-files`, so tracked files and untracked files that are not ignored are read. Outside a work tree the directory is walked.
+
 ### Token budget
 
 Without `--ai-select`, `--token-budget N` removes the largest files, one at a time, until the total is at most N, and prints what it removed. Tokens are counted with tiktoken's `cl100k_base` encoding, so counts are an estimate for models that use a different tokeniser. tiktoken downloads that encoding the first time it is used.
 
 ### GitHub
 
-Public repositories work without credentials, within GitHub's unauthenticated rate limit. Set `GITHUB_TOKEN` for private repositories and a higher limit. A repository whose tree is too large for the GitHub API to list in one response is rejected.
+A repository is read from its tarball, which takes two requests whatever its size, so public repositories work without credentials. Set `GITHUB_TOKEN` for private repositories. An archive larger than 500 MB is rejected; clone it and run `repo2txt` on the directory.
 
 ## LLM-assisted selection
 
@@ -60,9 +62,9 @@ repo2txt . --ai-select --ai-query "how does authentication work" --token-budget 
 
 These variables, and `GITHUB_TOKEN`, can also go in a `.env` file; see `.env.example`. There is no default model, so `LLM_MODEL` must be set.
 
-The model is given the repository tree with token counts and two tools, `select_files` and `adjust_selection`. It cannot read or edit files. Every path it proposes is checked against the repository; unknown paths are reported back to the model and nothing invalid enters the selection. The budget defaults to 100,000 tokens (`--token-budget`) and is shown, not enforced: the model is told the budget and the running total.
+The model is given the repository tree with token counts and two tools, `select_files` and `adjust_selection`. It cannot read or edit files. Every path it proposes is checked against the repository; unknown paths are reported back to the model and nothing invalid enters the selection. The budget defaults to 100,000 tokens (`--token-budget`) and is enforced: a change that would take the selection over it is refused, and the model is told by how much and which files are largest. It gets up to five rounds of tool calls per message to correct a refused selection.
 
-With `--ai-query` the model makes one selection and the output is written straight away. Without it you chat, and write the output with `/generate`.
+With `--ai-query` the model answers one request and the output is written straight away. Without it you chat, and write the output with `/generate`.
 
 | Command | Effect |
 | --- | --- |
@@ -110,7 +112,7 @@ cli.py      the command
 
 A source lists candidate files, reads them concurrently, and returns a `Repository`: the text and token count of every file. Selection is a list of paths into that repository, chosen either by `select_within_budget` or by the AI session. Output is a function of the repository and the selected paths, so both routes share it.
 
-GitHub is read through the git tree endpoint, which lists every file with its size in one request, and the blob endpoint for contents. Nothing is cloned.
+GitHub is read by downloading the branch's tarball into memory and filtering its members. Nothing is cloned or written to disk.
 
 ## Development
 
@@ -120,7 +122,7 @@ uv run ruff check
 uv run ruff format
 ```
 
-The end-to-end tests build a small repository in a temporary directory and run the command on it. The GitHub test needs network access and `GITHUB_TOKEN` and is skipped otherwise. The AI session needs a model and is not covered by the tests.
+The end-to-end tests build a small repository in a temporary directory and run the command on it. GitHub is tested against a stand-in transport that serves a generated tarball; one further test reads a real repository and needs network access and `GITHUB_TOKEN`. The AI session's tool loop is tested with scripted model replies. No test calls a real model.
 
 ## Licence
 
