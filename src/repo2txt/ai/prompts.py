@@ -4,28 +4,28 @@ This module provides different prompt styles and strategies for guiding
 the AI in file selection tasks.
 """
 
-from typing import TYPE_CHECKING
+from ..core.tree import build_tree, render_tree
+from .state import StateManager
 
-from ..core.models import FileNode
-
-if TYPE_CHECKING:
-    from .state import StateManager
-    from ..core.models import AnalysisResult
+PROMPT_STYLES = ("standard", "meta-reasoning", "xml")
 
 
 class PromptGenerator:
     """Generates system prompts for AI file selection."""
-    
-    def __init__(self, state_manager: 'StateManager', analysis_result: 'AnalysisResult'):
+
+    def __init__(self, state_manager: StateManager, repo_name: str):
         self.state_manager = state_manager
-        self.analysis_result = analysis_result
-    
+        self.repo_name = repo_name
+        self.total_files = len(state_manager.file_tokens)
+        self.total_tokens = sum(state_manager.file_tokens.values())
+        self._tree = render_tree(build_tree(repo_name, state_manager.file_tokens), show_tokens=True)
+
     def generate(self, style: str = "standard") -> str:
         """Generate system prompt using the specified style.
-        
+
         Args:
             style: One of "standard", "meta-reasoning", or "xml"
-            
+
         Returns:
             Generated system prompt
         """
@@ -35,72 +35,14 @@ class PromptGenerator:
             return self._create_xml_prompt()
         else:
             return self._create_standard_prompt()
-    
-    def _format_file_tree(self, node: FileNode, prefix: str = "", is_last: bool = True, use_simple_format: bool = False) -> str:
-        """Format file tree for display.
-        
-        Args:
-            node: The FileNode to format
-            prefix: Current indentation prefix
-            is_last: Whether this is the last child at its level
-            use_simple_format: If True, uses simple indentation (for token-constrained scenarios) # TODO: Make this an accessible parameter
-        """
-        if not node:
-            return ""
-        
-        # Tree connectors are preferred for LLM comprehension (more training data, clearer structure)
-        if use_simple_format:
-            return self._format_tree_simple(node, 0)
-        else:
-            # Simple format available for token-constrained scenarios
-            return self._format_tree_connectors(node, prefix, is_last)
-    
-    def _format_tree_simple(self, node: FileNode, indent: int = 0) -> str:
-        """Format file tree with simple indentation (for token-constrained scenarios)."""
-        lines = []
-        prefix = "  " * indent
-        
-        if node.is_dir:
-            lines.append(f"{prefix}▸ {node.name}/ (~{node.total_tokens:,} tokens)")
-            for child in sorted(node.children, key=lambda x: (not x.is_dir, x.name)):
-                lines.append(self._format_tree_simple(child, indent + 1))
-        else:
-            token_str = f"~{node.token_count:,} tokens" if node.token_count else "0 tokens"
-            lines.append(f"{prefix}{node.name} ({token_str})")
-        
-        return '\n'.join(filter(None, lines))
-    
-    def _format_tree_connectors(self, node: FileNode, prefix: str = "", is_last: bool = True) -> str:
-        """Format file tree with connectors (default - better for LLM comprehension)."""
-        lines = []
-        connector = "└── " if is_last else "├── "
-        
-        if node.is_dir:
-            lines.append(f"{prefix}{connector}▸ {node.name}/ (~{node.total_tokens:,} tokens)")
-            extension = "    " if is_last else "│   "
-            for i, child in enumerate(node.children):
-                is_last_child = i == len(node.children) - 1
-                lines.append(self._format_tree_connectors(child, prefix + extension, is_last_child))
-        else:
-            token_str = f"~{node.token_count:,} tokens" if node.token_count else "0 tokens"
-            lines.append(f"{prefix}{connector}{node.name} ({token_str})")
-        
-        return "\n".join(lines)
-    
-    def _get_tree_string(self) -> str:
-        """Get file tree as string, handling both string and FileNode formats."""
-        if isinstance(self.analysis_result.file_tree, str):
-            return self.analysis_result.file_tree
-        else:
-            return self._format_file_tree(self.analysis_result.file_tree)
-    
+
     def _create_standard_prompt(self) -> str:
         """Create standard system prompt for the agent."""
         selection_summary = self.state_manager.get_current_selection_summary()
-        tree_str = self._get_tree_string()
-        
-        return f"""You are an AI assistant helping a user select files from the repository '{self.analysis_result.repo_name}'.
-The repository contains {self.analysis_result.total_files} files with {self.analysis_result.total_tokens:,} total tokens.
+        tree_str = self._tree
+
+        return f"""You are an AI assistant helping a user select files from the repository '{self.repo_name}'.
+The repository contains {self.total_files} files with {self.total_tokens:,} total tokens.
 Your goal is to help the user produce a reading list of files relevant to their task, within a budget of {self.state_manager.state.token_budget:,} tokens.
 
 {selection_summary}
@@ -119,15 +61,15 @@ Guidelines:
 - Use the repository structure provided to ensure file paths exist
 - Prioritize files that are most relevant to the user's request
 """
-    
+
     def _create_meta_reasoning_prompt(self) -> str:
         """Create system prompt with meta-reasoning framework for intelligent file selection."""
         selection_summary = self.state_manager.get_current_selection_summary()
-        tree_str = self._get_tree_string()
-        
+        tree_str = self._tree
+
         return f""" You are an expert code curator. Your job is to select files from this repository that will enable someone to definitively answer the user's question within a {self.state_manager.state.token_budget:,} token budget.
 
-Repository: '{self.analysis_result.repo_name}' ({self.analysis_result.total_files} files, {self.analysis_result.total_tokens:,} tokens)
+Repository: '{self.repo_name}' ({self.total_files} files, {self.total_tokens:,} tokens)
 
 {selection_summary}
 
@@ -251,21 +193,21 @@ User expertise level affects information needs. A beginner asking "how does auth
     1. You are collaborating with the user to find their ideal reading list/selection, not just executing. Share your reasoning, voice uncertainties, and use the conversation to refine your understanding. The goal is working together to create the optimal reading list for answering their question.
     2. Always double check your selections are valid file paths against the repository structure above - paths are relative to the repository root (e.g., 'src/main.py'). 
 """
-    
+
     def _create_xml_prompt(self) -> str:
         """Create system prompt with meta-reasoning framework using XML formatting."""
         selection_summary = self.state_manager.get_current_selection_summary()
-        tree_str = self._get_tree_string()
-        
+        tree_str = self._tree
+
         return f"""<system_prompt>
 <role>expert code curator</role>
 <objective>Select files from this repository that will enable someone to definitively answer the user's question within a {self.state_manager.state.token_budget:,} token budget</objective>
 
 <repository>
-    <name>{self.analysis_result.repo_name}</name>
+    <name>{self.repo_name}</name>
     <stats>
-        <files>{self.analysis_result.total_files}</files>
-        <tokens>{self.analysis_result.total_tokens:,}</tokens>
+        <files>{self.total_files}</files>
+        <tokens>{self.total_tokens:,}</tokens>
     </stats>
 </repository>
 
