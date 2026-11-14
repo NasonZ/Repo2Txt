@@ -1,3 +1,3 @@
-"""Repo2Txt - Convert repositories to LLM-friendly text formats."""
+"""Token-aware repository context selection for LLMs and coding agents."""
 
-__version__ = "2.0.0"
+__version__ = "3.0.0"

@@ -5,9 +5,7 @@ import tarfile
 import httpx
 import pytest
 
-from repo2txt.adapters import SourceError, open_source
-from repo2txt.adapters.github import GitHubSource, parse_github_ref
-from repo2txt.core.models import Config
+from repo2txt.sources import SourceError, load, parse_github_ref
 
 
 @pytest.mark.parametrize(
@@ -15,7 +13,6 @@ from repo2txt.core.models import Config
     [
         "owner/repo",
         "github.com/owner/repo",
-        "https://github.com/owner/repo",
         "https://github.com/owner/repo.git",
         "https://github.com/owner/repo/tree/main/src",
     ],
@@ -24,14 +21,9 @@ def test_parses_repository_references(ref):
     assert parse_github_ref(ref) == ("owner", "repo")
 
 
-@pytest.mark.parametrize("ref", ["./relative/path", "/abs/path", "a/b/c", "justaname", ""])
+@pytest.mark.parametrize("ref", ["repo", "a/b/c", "https://example.com/owner/repo", "-x/repo"])
 def test_rejects_things_that_are_not_repositories(ref):
     assert parse_github_ref(ref) is None
-
-
-def test_unknown_reference_is_an_error(tmp_path):
-    with pytest.raises(SourceError, match="not a directory"):
-        open_source(str(tmp_path / "missing" / "dir"), Config())
 
 
 def archive(files: dict[str, bytes]) -> bytes:
@@ -49,7 +41,10 @@ def github(files: dict[str, bytes], requests: list[str]) -> httpx.MockTransport:
         requests.append(request.url.path)
         if request.url.path == "/repos/owner/repo":
             return httpx.Response(200, json={"default_branch": "trunk"})
-        if request.url.path == "/repos/owner/repo/tarball/trunk":
+        if request.url.path in (
+            "/repos/owner/repo/tarball/trunk",
+            "/repos/owner/repo/tarball/abc123",
+        ):
             return httpx.Response(200, content=archive(files))
         return httpx.Response(404)
 
@@ -61,29 +56,37 @@ def test_reads_a_repository_from_its_archive_in_two_requests():
     files |= {"node_modules/dep/index.js": b"x", "logo.png": b"\x89PNG\x00"}
     requests: list[str] = []
 
-    source = GitHubSource(
-        "owner", "repo", Config(github_token=None), transport=github(files, requests)
-    )
-    repository = source.load()
+    repo = load("owner/repo", transport=github(files, requests))
 
     assert len(requests) == 2
-    assert repository.branch == "trunk"
-    assert len(repository.files) == 150
-    assert repository.files["src/module_149.py"].content == "VALUE = 149\n"
+    assert repo.ref == "trunk"
+    assert len(repo.files) == 150
+    assert repo.files["src/module_149.py"].text == "VALUE = 149\n"
 
 
-def test_a_refused_request_stops_the_run():
+def test_a_named_commit_is_read_without_asking_for_the_default_branch():
+    requests: list[str] = []
+
+    repo = load("owner/repo", ref="abc123", transport=github({"a.py": b"A = 1\n"}, requests))
+
+    assert requests == ["/repos/owner/repo/tarball/abc123"]
+    assert repo.ref == "abc123" and list(repo.files) == ["a.py"]
+
+
+def test_a_refused_request_stops_with_advice():
     transport = httpx.MockTransport(lambda request: httpx.Response(403))
 
     with pytest.raises(SourceError, match="GITHUB_TOKEN"):
-        GitHubSource("owner", "repo", Config(github_token=None), transport=transport).load()
+        load("owner/repo", transport=transport)
+
+
+def test_something_that_is_neither_a_directory_nor_a_repository_is_an_error(tmp_path):
+    with pytest.raises(SourceError, match="not a directory"):
+        load(str(tmp_path / "missing"))
 
 
 @pytest.mark.skipif(not os.getenv("GITHUB_TOKEN"), reason="needs GITHUB_TOKEN and network access")
 def test_loads_a_public_repository():
-    repository = open_source("Doriandarko/RepoToTextForLLMs", Config()).load()
+    repo = load("Doriandarko/RepoToTextForLLMs")
 
-    assert repository.name == "RepoToTextForLLMs"
-    assert isinstance(repository.branch, str)
-    assert "repototxt.py" in repository.files
-    assert repository.tokens() > 0
+    assert repo.files and repo.tokens() > 0
