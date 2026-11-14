@@ -1,129 +1,156 @@
 # Repo2Txt
 
-Token-aware repository context selection for LLMs and coding agents.
+Choose what an LLM or a coding agent reads from a repository, within a token budget.
 
-Repo2Txt reads a local directory or a GitHub repository, counts the tokens in every text file, and writes the files you want as one Markdown or XML document. Files can be chosen by a token budget alone, or by an LLM that you talk to.
+A model reading code has a fixed amount of room, and most of a repository is not about the
+question in hand. Repo2Txt answers three questions, each with a cap on how much it prints:
+what is in this repository and how big is each part, which files matter for this question,
+and what is in these files.
+
+```console
+$ repo2txt map -r pallets/click --max-tokens 300
+# click ref=main: 169 files, 327,719 tokens (o200k_base)
+.github/ 3,438 (10 files)
+docs/ 61,020 (42 files)
+examples/ 8,716 (36 files)
+src/ 102,393 (18 files)
+tests/ 130,218 (59 files)
+CHANGES.md 19,683
+LICENSE.txt 296
+README.md 403
+pyproject.toml 1,552
+# depth 1 of 5: deeper directories are collapsed
+# next: repo2txt map tests/ -r pallets/click
+# next: repo2txt map src/ -r pallets/click
+# next: repo2txt map docs/ -r pallets/click
+
+$ repo2txt select "ParamType convert fail" -r pallets/click -b 30k
+# click: 18 files, 29,987 of 30,000 tokens, from 97 candidates (bm25)
+src/click/types.py	10953
+docs/parameter-types.md	2269
+examples/validation/validation.py	326
+...
+
+$ repo2txt select "ParamType convert fail" -r pallets/click -b 12k | repo2txt pack --stdin -r pallets/click -b 12k
+```
+
+Output from 14 November 2026; the last command prints the files themselves.
 
 ## Install
 
+```bash
+uv tool install git+https://github.com/NasonZ/Repo2Txt     # or: pip install git+https://...
+```
+
 Python 3.11 or later.
 
+## Commands
+
+Every command takes `-r/--repo` (a directory, a GitHub URL or `owner/repo`; default `.`),
+`--ref` (a GitHub branch, tag or commit), `-i/--include` and `-e/--exclude` globs, and
+`--json`. Budgets are written `8000`, `8k` or `1.5m`. Output goes to stdout.
+
+**`repo2txt map [DIRECTORY]`** prints the tree with token counts. If the whole tree does not
+fit `--max-tokens` (default 4k) it is shown to the deepest level that does, and directories
+below that are one line each with their totals. `--depth N` fixes the level.
+
+**`repo2txt select QUERY`** ranks files for a question and lists those that fit `-b/--budget`
+(default 32k), best first, as `path<TAB>tokens`. It prints no contents. `--method bm25` (the
+default) scores paths, identifiers and text and needs no model. `--method llm` gives a model
+the tree and lets it choose; see below.
+
+**`repo2txt pack [ITEMS...]`** prints the contents of files as Markdown (or `-f xml`). An item
+is a path, a directory, a glob, or `path:10-80` for a line range. Files are included whole in
+the order given until `-b/--budget` is full. What does not fit is listed with its token cost
+and is never cut. With no items the whole repository is packed, smallest files first.
+`--stdin` reads items from a pipe; `-o FILE` writes the document and prints a summary.
+
+**`repo2txt chat`** is a terminal conversation with a model that builds a selection:
+`/generate [FILE]`, `/undo`, `/clear`, `/budget N`, `/quit`.
+
+**`repo2txt mcp`** serves `repo_map`, `repo_select` and `repo_pack` over MCP (below).
+
+Failures print `error: <what went wrong>` and, where there is one, `next: <a command to try>`.
+Exit status is 0 on success, 1 when the work failed and 2 when the command was misused.
+
+### What is read
+
+In a git work tree the file list comes from `git ls-files`: tracked files, and untracked files
+that git does not ignore. A GitHub repository is read from its tarball in two requests, so
+public repositories need no token; set `GITHUB_TOKEN` for private ones. Hidden files and
+directories (except `.github` and `.gitlab`), `node_modules`, lockfiles, minified files,
+source maps, binary formats, files containing null bytes and files over 1 MB are left out.
+Symbolic links are not followed.
+
+Tokens are counted with tiktoken's `o200k_base`. Other tokenisers differ, usually by under a
+fifth, so treat counts as estimates and leave headroom.
+
+## For coding agents
+
+**Skill.** `skills/repo2txt/SKILL.md` follows the [Agent Skills](https://agentskills.io)
+format, which Claude Code, Codex and pi all read. Copy the directory to `~/.claude/skills/`
+for Claude Code or `~/.agents/skills/` for Codex and pi.
+
+**MCP.** Install with the extra and register the server:
+
 ```bash
-git clone https://github.com/NasonZ/Repo2Txt.git
-cd Repo2Txt
-uv sync            # or: pip install -e .
+uv tool install "repo2txt[mcp] @ git+https://github.com/NasonZ/Repo2Txt"
+claude mcp add repo2txt -- repo2txt mcp
 ```
 
-## Use
+The three tools are read-only and return the same text as the commands. Their default cap is
+4,000 tokens, under the size at which Claude Code warns (10,000) and pi truncates (20 KB).
 
-```bash
-repo2txt .                                   # every text file in the current directory
-repo2txt owner/repo                          # a GitHub repository
-repo2txt https://github.com/owner/repo --branch dev
-repo2txt . --token-budget 50000              # drop the largest files until the total fits
-repo2txt . --format xml --json               # XML output, plus token counts as JSON
-repo2txt . --exclude-dirs "fixtures,logs"    # skip more directories
-```
+The command line is the main interface: a skill costs an agent a few hundred tokens of
+context, and tool definitions cost more.
 
-Results go to `output/<name>_<timestamp>/`:
-
-```text
-<name>_analysis.md          the repository structure and the selected files
-<name>_token_report.txt     tokens per file, largest first
-<name>_tokens.json          only with --json
-```
-
-In the Markdown output each file is a fenced block whose info string is its path. With `--format xml` each file is a `<file path="...">` element and the file is named `<name>_analysis.xml`.
-
-### What is included
-
-Hidden files and directories (except `.github` and `.gitlab`), directories such as `node_modules`, `venv`, `dist` and `build`, lockfiles, minified files, source maps, files with binary extensions, files that contain null bytes, and files larger than `--max-file-size` (1 MiB by default) are skipped. Symbolic links are not followed.
-
-In a git work tree, files ignored by git are left out as well: the file list comes from `git ls-files`, so tracked files and untracked files that are not ignored are read. Outside a work tree the directory is walked.
-
-### Token budget
-
-Without `--ai-select`, `--token-budget N` removes the largest files, one at a time, until the total is at most N, and prints what it removed. Tokens are counted with tiktoken's `cl100k_base` encoding, so counts are an estimate for models that use a different tokeniser. tiktoken downloads that encoding the first time it is used.
-
-### GitHub
-
-A repository is read from its tarball, which takes two requests whatever its size, so public repositories work without credentials. Set `GITHUB_TOKEN` for private repositories. An archive larger than 500 MB is rejected; clone it and run `repo2txt` on the directory.
-
-## LLM-assisted selection
+## Choosing with a model
 
 ```bash
 export LLM_MODEL=<model name>
-export LLM_API_KEY=...                       # not needed if LLM_BASE_URL points at a local server
-export LLM_BASE_URL=http://localhost:8080/v1 # optional; any OpenAI-compatible endpoint
+export LLM_API_KEY=...                        # not needed if LLM_BASE_URL is a local server
+export LLM_BASE_URL=http://localhost:8080/v1  # optional; any OpenAI-compatible endpoint
 
-repo2txt . --ai-select                       # chat, then /generate
-repo2txt . --ai-select --ai-query "how does authentication work" --token-budget 30000
+repo2txt select "how are sessions invalidated on logout" --method llm -b 30k
 ```
 
-These variables, and `GITHUB_TOKEN`, can also go in a `.env` file; see `.env.example`. There is no default model, so `LLM_MODEL` must be set.
-
-The model is given the repository tree with token counts and two tools, `select_files` and `adjust_selection`. It cannot read or edit files. Every path it proposes is checked against the repository; unknown paths are reported back to the model and nothing invalid enters the selection. The budget defaults to 100,000 tokens (`--token-budget`) and is enforced: a change that would take the selection over it is refused, and the model is told by how much and which files are largest. It gets up to five rounds of tool calls per message to correct a refused selection.
-
-With `--ai-query` the model answers one request and the output is written straight away. Without it you chat, and write the output with `/generate`.
-
-| Command | Effect |
-| --- | --- |
-| `/generate [markdown\|xml] [json]` | Write the selected files to the output directory |
-| `/undo` | Restore the state before your last message |
-| `/redo` | Regenerate the last reply |
-| `/clear` | Reset the conversation and the selection |
-| `/save [name]` | Save the conversation as JSON |
-| `/toggle streaming` | Switch streamed replies on or off |
-| `/toggle prompt` | Cycle the prompt style |
-| `/toggle budget <n>` | Set the token budget |
-| `/debug` | Show or hide prompts and tool calls |
-| `/help`, `/quit` | Help; leave the chat |
-
-`--prompt-style` chooses between three system prompts: `standard`, `meta-reasoning` and `xml`. `--debug` shows the system prompt and every tool call.
-
-## Options
-
-```text
-repo2txt REPO [OPTIONS]
-
-  -o, --output-dir DIR      Where to write results (default: output)
-  -f, --format FORMAT       markdown or xml (default: markdown)
-  --token-budget N          Token budget
-  -m, --max-file-size N     Skip files larger than N bytes (default: 1048576)
-  --exclude-dirs LIST       Comma-separated extra directory names to skip
-  --branch NAME             GitHub branch (default: the repository's default)
-  --json                    Also write token counts as JSON
-  --ai-select               Select files with an LLM
-  --ai-query TEXT           With --ai-select, one-shot selection without chat
-  --prompt-style STYLE      standard, meta-reasoning or xml
-  --debug                   Show prompts and tool calls
-  --version, --help
-```
+The model sees the tree with token counts, collapsed to about 6,000 tokens, and has three
+tools: replace the selection, adjust it, and list a collapsed directory. It cannot read file
+contents. Every path is checked against the repository, and a change that would exceed the
+budget is refused and explained, so the result always fits. It gets five rounds of tool calls
+per request. These variables can also go in a `.env` file.
 
 ## How it is put together
 
 ```text
-adapters/   LocalSource and GitHubSource list candidate files and fetch their bytes
-core/       filtering, token counting, budget selection, Markdown/XML/JSON output
-ai/         the chat session, its commands, prompts, tools and selection state
-ui.py       terminal output
-cli.py      the command
+sources.py     a directory or a GitHub tarball, as (path, bytes) pairs, filtered
+models.py      Repository and RepoFile; tokens are counted per file on first use
+selection.py   Selection, a set of paths held within a budget; fit() for ranked lists
+tree.py        the tree with totals, and its entries down to a depth
+rank.py        BM25 over paths, identifiers and text
+api.py         repo_map, repo_select, repo_pack: everything else calls only these
+render.py      text and JSON that fit a cap; hints are dropped before items are
+llm.py         Complete, the one function type through which a model is called
+selector.py    the model's prompt, tools and loop over a Selection
+cli.py  chat.py  mcp_server.py   three ways in
 ```
 
-A source lists candidate files, reads them concurrently, and returns a `Repository`: the text and token count of every file. Selection is a list of paths into that repository, chosen either by `select_within_budget` or by the AI session. Output is a function of the repository and the selected paths, so both routes share it.
-
-GitHub is read by downloading the branch's tarball into memory and filtering its members. Nothing is cloned or written to disk.
+`llm.Complete` takes a conversation and tool schemas and returns text and tool calls. The
+default calls an OpenAI-compatible endpoint; any other client can be passed in its place.
 
 ## Development
 
 ```bash
 uv run pytest
-uv run ruff check
-uv run ruff format
+uv run ruff check && uv run ruff format --check
 ```
 
-The end-to-end tests build a small repository in a temporary directory and run the command on it. GitHub is tested against a stand-in transport that serves a generated tarball; one further test reads a real repository and needs network access and `GITHUB_TOKEN`. The AI session's tool loop is tested with scripted model replies. No test calls a real model.
+The tests run the commands on a small repository built in a temporary directory, read GitHub
+through a stand-in transport that serves a generated tarball, drive the selector with scripted
+model replies, and call the MCP server through the SDK's in-memory client. One further test
+reads a real repository and needs network access and `GITHUB_TOKEN`. No test calls a model.
 
 ## Licence
 
-MIT. See [LICENSE](LICENSE). The project began as a fork of [RepoToTextForLLMs](https://github.com/Doriandarko/RepoToTextForLLMs) by Pietro Schirano, which is also MIT licensed.
+MIT. See [LICENSE](LICENSE). The project began as a fork of
+[RepoToTextForLLMs](https://github.com/Doriandarko/RepoToTextForLLMs) by Pietro Schirano.
