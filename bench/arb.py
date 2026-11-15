@@ -141,7 +141,13 @@ def ranking(method: str, repo: Repository, query: str) -> tuple[list[str], dict]
         except Problem:
             chosen = []
         rest = [p for p, _ in rank.bm25(repo, query) if p not in chosen]
-        spent = {"input_tokens": usage.input, "output_tokens": usage.output, "calls": usage.calls}
+        spent = {
+            "input_tokens": usage.input,
+            "output_tokens": usage.output,
+            "cached_tokens": usage.cached,
+            "cache_write_tokens": usage.cache_written,
+            "calls": usage.calls,
+        }
         return chosen + rest, spent | {"selected": len(chosen)}
     raise ValueError(f"unknown method {method}")
 
