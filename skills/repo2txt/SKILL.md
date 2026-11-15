@@ -34,6 +34,8 @@ Files that ranked well but did not fit are listed as `# did not fit`.
 
 `--method llm` asks the model named by `LLM_MODEL` to choose from the tree instead. It is
 slower and costs a model call; use it when the query cannot name anything in the code.
+Add `--lines` at small budgets (8k or so): the model also picks line ranges from outlines,
+and the output includes `path:first-last` items that `pack --stdin` reads.
 
 ## pack
 

@@ -84,7 +84,9 @@ def oracle_lines(repo: Repository, spans: list[list], gold: list[str], budget: i
     """The needed lines themselves, smallest span first: the ceiling for any packing."""
     shown: Shown = {}
     used = 0
-    for f, a, b in sorted(((f, a, b) for f, a, b in spans if f in gold), key=lambda s: s[2] - s[1]):
+    # A needed file that repo2txt's filters leave out cannot be shown, so it stays a miss.
+    readable = [(f, a, b) for f, a, b in spans if f in gold and f in repo.files]
+    for f, a, b in sorted(readable, key=lambda s: s[2] - s[1]):
         text = "\n".join(repo.files[f].text.split("\n")[a - 1 : b])
         cost = count_tokens(text) + (0 if f in shown else count_tokens(f) + FRAME_TOKENS)
         if used + cost <= budget:

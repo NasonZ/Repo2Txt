@@ -54,6 +54,26 @@ def curve(results: list[dict]) -> dict:
     return out
 
 
+def pairs(results: list[dict]) -> dict:
+    """Paired differences between methods on the same held-out issues."""
+    spec = {
+        "llm-bm25": [("llm", "bm25", b, "recall") for b in (8000, 32000, 128000)],
+        "bm25-plain": [("bm25", "bm25-plain", b, "recall") for b in (8000, 32000, 128000)],
+        "lines-llm": [("llm-lines", "llm", 8000, "line_recall")],
+    }
+    out = {}
+    for name, items in spec.items():
+        for a, b, budget, key in items:
+            d, lo, hi, n = paired(results, a, b, budget, key)
+            out[f"{name}@{budget}"] = {
+                "d": round(d, 3),
+                "lo": round(lo, 3),
+                "hi": round(hi, 3),
+                "n": n,
+            }
+    return out
+
+
 def changes() -> list[dict]:
     """Each change tried on the tuning split, and what it did to recall at 32k."""
     free = rows("dev-free")
@@ -195,6 +215,7 @@ def main() -> None:
             "output": sum(r["output_tokens"] for r in results),
         },
         "curve": curve(results),
+        "pairs": pairs(results),
         "changes": changes(),
         "examples": tasks_view(results, strip_ids),
         "transcripts": {

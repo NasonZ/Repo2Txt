@@ -61,7 +61,8 @@ below that are one line each with their totals. `--depth N` fixes the level.
 file takes when packed, its heading included, and 60 tokens of the budget are left for the
 packed document's own heading, so a selection always packs within the same budget. `--method bm25` (the
 default) scores paths, identifiers and text and needs no model. `--method llm` gives a model
-the tree and lets it choose; see below.
+the tree and lets it choose; see below. With `--method llm`, `--lines` lists line ranges
+(`path:first-last`) as well as whole files.
 
 **`repo2txt pack [ITEMS...]`** prints the contents of files as Markdown (or `-f xml`). An item
 is a path, a directory, a glob, or `path:10-80` for a line range. Files are included whole in
@@ -130,6 +131,12 @@ contents. Every path is checked against the repository, and a change that would 
 budget is refused and explained, so the result always fits. It gets five rounds of tool calls
 per request. These variables can also go in a `.env` file.
 
+At small budgets the needed files often do not fit whole. `--lines` adds a second step: the
+model first chooses files at four times the budget, then reads an outline of each (every
+block with its line range and size) and picks the ranges to include. What budget is left
+goes to its chosen files whole. The output is `path:first-last` items, so
+`select --method llm --lines ... | pack --stdin` packs them. It costs one more model call.
+
 ## How well it selects
 
 Measured on [ContextBench](https://huggingface.co/datasets/Contextbench/ContextBench) tasks:
@@ -137,29 +144,41 @@ real issues, each with the files a person judged necessary to resolve it. A meth
 the issue text and the repository at that commit. Recall is the share of the needed files it
 fitted into the budget; precision is the share of what it chose that was needed.
 
+The methods were tuned on 281 issues from 40 repositories. The table is from 219 further
+issues from 19 other repositories, held out until the methods were fixed and then run once.
+
 | Method | 8k tokens | 32k tokens | 128k tokens |
 |---|---|---|---|
-| Smallest files first | 0.01 | 0.03 | 0.13 |
-| BM25 alone | 0.15 | 0.29 | 0.47 |
-| `select` (BM25 with three added signals) | 0.28 (0.11) | 0.47 (0.10) | 0.67 (0.07) |
-| `select --method llm` (claude-haiku-5-5) | 0.47 (0.38) | 0.68 (0.33) | 0.77 (0.27) |
-| The needed files themselves | 0.60 | 0.92 | 1.00 |
+| Smallest files first | 0.01 | 0.02 | 0.08 |
+| BM25 alone | 0.15 (0.07) | 0.34 (0.08) | 0.51 (0.06) |
+| `select` (BM25 with three added signals) | 0.25 (0.11) | 0.55 (0.12) | 0.67 (0.07) |
+| `select --method llm` (claude-haiku-5-5) | 0.47 (0.39) | 0.75 (0.35) | 0.81 (0.25) |
+| The needed files themselves | 0.62 | 0.93 | 0.99 |
 
-Recall, with precision in brackets. The first three rows and the last are 281 tasks from 40
-repositories; the model row is 100 of those tasks. These are the tasks the methods were
-tuned on, so they flatter the result. A further 219 tasks from 19 other repositories are
-held out and have not been run.
+Recall, with precision in brackets. Compared issue by issue, the model selector's lead over
+`select` is +0.22 at 8k (95% interval 0.13 to 0.28), +0.20 at 32k (0.15 to 0.25) and +0.15
+at 128k (0.08 to 0.21), with intervals from resampling whole repositories.
 
-What the numbers say. The lexical default finds about half the needed files at 32k and
-fills the budget doing it: nine files in ten that it returns are not needed. A small model
-choosing from the tree and the lexical shortlist finds two thirds, with a third of its
-choices needed. The last row is the ceiling: at 8k even a perfect selection reaches 0.60,
-because the needed files often do not fit whole.
+What the numbers say. The lexical default finds about half the needed files at 32k and fills
+the budget doing it: almost nine files in ten that it returns are not needed. A small model
+choosing from the tree and the lexical shortlist finds three quarters, and a third of its
+choices are needed. The last row is the ceiling for whole files: at 8k even a perfect choice
+reaches 0.62, because the needed files often do not fit whole.
 
-The needed files are sufficient, not minimal, so precision is understated. Whether the
-models had seen these repositories and fixes in training was not measured.
-[docs/report-2026-11-14.md](docs/report-2026-11-14.md) is the full account: each experiment,
-what was tried and dropped, and the limits. `python -m bench.run` reproduces the rows.
+**Line ranges at small budgets.** `select --method llm --lines` lets the model pick line
+ranges from outlines of the files it chose, then fills the rest of the budget with whole
+files. At 8k it raises the share of needed lines delivered from 0.52 to 0.67 (+0.15, 0.08
+to 0.22; better on 88 issues, worse on 14), and file recall from 0.47 to 0.70. Its output is
+`path:first-last` items, which `pack --stdin` reads.
+
+The model rows cost about 20 million input and 1 million output tokens for the held-out
+run. The needed files are sufficient, not minimal, so precision is understated. Whether the
+model had seen these repositories and fixes in training was not measured, and each
+configuration was run once. [The web piece](docs/index.html) shows the results with an
+issue-by-issue browser and a selector transcript;
+[docs/report-2026-11-14.md](docs/report-2026-11-14.md) is the full account of each
+experiment, what was tried and dropped, and the limits. `python -m bench.run` reproduces the
+rows.
 
 ## How it is put together
 

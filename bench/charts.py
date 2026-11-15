@@ -45,13 +45,15 @@ def rows(*names: str) -> list[dict]:
     return [json.loads(line) for n in names for line in (RESULTS / f"{n}.jsonl").open()]
 
 
-def paired(data: list[dict], a: str, b: str, budget: int) -> tuple[float, float, float, int]:
-    """Mean of (a - b) recall over shared tasks, with a 95% interval resampling repositories."""
+def paired(
+    data: list[dict], a: str, b: str, budget: int, key: str = "recall"
+) -> tuple[float, float, float, int]:
+    """Mean of (a - b) over shared tasks, with a 95% interval resampling repositories."""
     by = {(r["method"], r["task"]): r for r in data if r["budget"] == budget}
     tasks = sorted({t for m, t in by if m == a} & {t for m, t in by if m == b})
     groups: dict[str, list[float]] = defaultdict(list)
     for t in tasks:
-        groups[by[(a, t)]["repo"]].append(by[(a, t)]["recall"] - by[(b, t)]["recall"])
+        groups[by[(a, t)]["repo"]].append(by[(a, t)][key] - by[(b, t)][key])
     pools, rng = list(groups.values()), random.Random(0)
     means = sorted(
         mean(v for pool in rng.choices(pools, k=len(pools)) for v in pool) for _ in range(4000)
@@ -78,14 +80,14 @@ def svg(width: int, height: int, body: list[str], c: dict, title: str) -> str:
 
 
 def recall_by_budget(c: dict) -> str:
-    """Recall at each budget for the methods that matter, on the same 100 tasks."""
-    data = rows("dev-free", "dev-llm", "dev-tune", "dev-v2-budgets")
-    tasks = {r["task"] for r in data if r["method"] == "llm-v2" and r["budget"] == 32000}
+    """Recall at each budget for the methods that matter, on the held-out issues."""
+    data = [r for r in rows("test") if not r["error"]]
+    tasks = {r["task"] for r in data}
     series = [
         ("oracle", "Ceiling: the needed files", c["muted"], True),
-        ("llm-v2", "Model selector, kept", c["blue"], False),
-        ("llm", "Model selector, first version", c["aqua"], False),
+        ("llm", "Model selector", c["blue"], False),
         ("bm25", "Lexical default", c["orange"], False),
+        ("bm25-plain", "Plain BM25", c["aqua"], False),
     ]
     points = {
         m: [
@@ -113,7 +115,8 @@ def recall_by_budget(c: dict) -> str:
         text(
             24,
             36,
-            "The kept model selector finds 0.68 of the needed files at 32k tokens",
+            f"On held-out issues the model selector delivers {points['llm'][1]:.2f} "
+            f"of the needed files at 32k tokens",
             c["text"],
             17,
             weight=600,
@@ -121,7 +124,8 @@ def recall_by_budget(c: dict) -> str:
         text(
             24,
             60,
-            "Share of the needed files that fit in the budget. Same 100 tasks for every line.",
+            f"Share of the needed files that fit in the budget. {len(tasks)} held-out issues "
+            "from repositories never used in tuning.",
             c["muted"],
             13,
         ),
