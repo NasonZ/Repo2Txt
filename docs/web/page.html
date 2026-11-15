@@ -1,0 +1,594 @@
+<title>What Reaches the Model</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="description" content="How much of the code a fix needs reaches a coding agent within 8,000 to 128,000 tokens, measured on real issues.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Schibsted+Grotesk:wght@500;600;700&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&display=swap">
+<style>
+/* Layout: one reading column of about 66 characters; figures break out wider, as instruments
+   on the page. The context window is the motif: a strip of tokens, filled by what was chosen. */
+:root {
+  --paper: #f6f7f6;
+  --sheet: #ffffff;
+  --ink: #14171a;
+  --muted: #5b6269;
+  --rule: #dce0e2;
+  --wash: #edf0f1;
+  --lex: #eb6834;
+  --model: #2a78d6;
+  --first: #1baf7a;
+  --ceil: #6b7178;
+  --display: "Schibsted Grotesk", "Helvetica Neue", Arial, sans-serif;
+  --body: "Source Serif 4", Georgia, "Times New Roman", serif;
+  --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --measure: 680px;
+  --wide: 980px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #111315; --sheet: #181b1e; --ink: #eceef0; --muted: #a3abb2; --rule: #2b3035;
+    --wash: #1d2125; --lex: #e0652f; --model: #4a90e8; --first: #22a877; --ceil: #a3abb2;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #111315; --sheet: #181b1e; --ink: #eceef0; --muted: #a3abb2; --rule: #2b3035;
+  --wash: #1d2125; --lex: #e0652f; --model: #4a90e8; --first: #22a877; --ceil: #a3abb2;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--paper); color: var(--ink);
+  font: 400 18px/1.62 var(--body);
+  font-optical-sizing: auto;
+  -webkit-font-smoothing: antialiased;
+}
+.page {
+  padding-block: 56px 96px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.col { max-width: var(--measure); margin-inline: auto; }
+.wide { max-width: var(--wide); margin-inline: auto; }
+h1, h2, h3, .label, button, figcaption .t { font-family: var(--display); }
+h1 { font-size: clamp(40px, 6vw, 60px); line-height: 1.02; letter-spacing: -0.02em; margin: 14px 0 18px; font-weight: 700; text-wrap: balance; }
+h2 { font-size: 26px; line-height: 1.2; letter-spacing: -0.01em; margin: 64px 0 14px; font-weight: 600; text-wrap: balance; }
+h3 { font-size: 18px; margin: 32px 0 8px; font-weight: 600; }
+p { margin: 0 0 18px; }
+a { color: inherit; text-decoration-color: color-mix(in srgb, var(--model) 55%, transparent); text-underline-offset: 3px; }
+a:hover { text-decoration-color: var(--model); }
+.kicker { font: 500 13px/1.3 var(--mono); color: var(--muted); letter-spacing: 0.02em; }
+.dek { font-size: 21px; line-height: 1.5; color: var(--muted); margin-bottom: 28px; text-wrap: pretty; }
+.byline { font: 500 14px/1.4 var(--display); color: var(--muted); display: flex; flex-wrap: wrap; gap: 6px 18px; padding-block: 14px; border-block: 1px solid var(--rule); }
+code, .mono { font-family: var(--mono); font-size: 0.84em; }
+.num { font-weight: 600; }
+.small { font-size: 15px; color: var(--muted); }
+
+/* Findings */
+.findings { list-style: none; padding: 0; margin: 28px 0 8px; display: grid; gap: 18px; }
+.findings li { display: grid; grid-template-columns: 8px 1fr; gap: 16px; }
+.findings li::before { content: ""; width: 8px; height: 8px; border-radius: 2px; background: var(--ink); margin-top: 11px; }
+.findings b { font-family: var(--display); font-weight: 600; }
+
+/* Figures */
+figure { margin: 36px auto 40px; }
+.sheet { background: var(--sheet); border: 1px solid var(--rule); border-radius: 12px; padding: 22px 22px 18px; }
+figcaption { margin-top: 12px; font-size: 15px; line-height: 1.5; color: var(--muted); max-width: var(--measure); }
+figcaption .t { display: block; font-weight: 600; font-size: 16px; color: var(--ink); margin-bottom: 2px; }
+.fig-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 10px 18px; margin-bottom: 14px; }
+.fig-title { font: 600 17px/1.3 var(--display); margin: 0; max-width: 620px; text-wrap: balance; }
+svg text { font-family: var(--display); }
+
+/* Controls */
+.seg { display: inline-flex; border: 1px solid var(--rule); border-radius: 8px; overflow: hidden; background: var(--wash); }
+.seg button { border: 0; background: transparent; color: var(--muted); font-size: 13px; font-weight: 500; padding: 7px 12px; cursor: pointer; }
+.seg button + button { border-left: 1px solid var(--rule); }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
+button:focus-visible, select:focus-visible, input:focus-visible, summary:focus-visible { outline: 2px solid var(--model); outline-offset: 2px; }
+
+/* The context-window strips */
+.strip-row { display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: 4px 16px; align-items: center; margin-bottom: 14px; }
+.strip-name { font: 600 14px/1.25 var(--display); }
+.strip-name small { display: block; font-weight: 400; color: var(--muted); font-size: 12.5px; margin-top: 2px; }
+.strip { position: relative; height: 34px; border-radius: 6px; background: var(--wash); overflow: hidden; display: flex; gap: 1px; }
+.strip i { display: block; height: 100%; flex: none; }
+.strip i.hit { background: var(--c); }
+.strip i.miss { background: color-mix(in srgb, var(--c) 22%, var(--sheet)); }
+.strip-note { grid-column: 2; font: 400 13px/1.4 var(--display); color: var(--muted); }
+.strip-note b { color: var(--ink); font-weight: 600; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font: 400 13px/1.4 var(--display); color: var(--muted); margin-top: 6px; }
+.legend span { display: inline-flex; align-items: center; gap: 7px; }
+.sw { width: 14px; height: 10px; border-radius: 2px; display: inline-block; }
+.task-line { font: 400 14px/1.45 var(--display); color: var(--muted); margin-bottom: 18px; }
+.task-line b { color: var(--ink); font-weight: 600; }
+
+/* Tables */
+.tbl-wrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font: 400 14.5px/1.4 var(--display); font-variant-numeric: tabular-nums; }
+th, td { text-align: right; padding: 8px 10px; border-bottom: 1px solid var(--rule); white-space: nowrap; }
+th:first-child, td:first-child { text-align: left; white-space: normal; }
+th { font-weight: 600; color: var(--muted); font-size: 13px; }
+td small { color: var(--muted); }
+tr.kept td:first-child { font-weight: 600; }
+
+/* Transcript stepper */
+.steps-head { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+.transcript { font: 400 13px/1.55 var(--mono); background: var(--wash); border-radius: 8px; padding: 14px 16px; min-height: 230px; overflow-x: auto; }
+.transcript .who { font-family: var(--display); font-weight: 600; font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); margin: 10px 0 4px; }
+.transcript .who:first-child { margin-top: 0; }
+.transcript .call { color: var(--ink); white-space: pre-wrap; word-break: break-word; }
+.transcript .res { color: var(--muted); white-space: pre-wrap; word-break: break-word; }
+.transcript .res.bad { color: var(--lex); }
+.transcript .say { font-family: var(--body); font-size: 15px; color: var(--ink); white-space: pre-wrap; }
+.stepper { display: flex; align-items: center; gap: 10px; font: 500 13px/1 var(--display); color: var(--muted); }
+.stepper button { border: 1px solid var(--rule); background: var(--sheet); color: var(--ink); border-radius: 7px; padding: 7px 11px; cursor: pointer; font-size: 13px; }
+.stepper button:disabled { opacity: 0.35; cursor: default; }
+.verdict { margin-top: 12px; font: 400 14px/1.5 var(--display); }
+.verdict b { font-weight: 600; }
+
+/* Task browser */
+.browser-controls { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; margin-bottom: 12px; }
+.browser-controls input { flex: 1 1 220px; min-width: 0; font: 400 15px/1.2 var(--display); padding: 9px 12px; border: 1px solid var(--rule); border-radius: 8px; background: var(--sheet); color: var(--ink); }
+.task-list { max-height: 560px; overflow-y: auto; border-top: 1px solid var(--rule); }
+details.task { border-bottom: 1px solid var(--rule); }
+details.task summary { list-style: none; cursor: pointer; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 14px; padding: 11px 4px; font: 400 14.5px/1.4 var(--display); }
+details.task summary::-webkit-details-marker { display: none; }
+.task-title { min-width: 0; overflow-wrap: anywhere; }
+.task-title small { display: block; color: var(--muted); font-size: 12.5px; margin-top: 2px; }
+.dots { display: flex; gap: 5px; align-items: center; font: 500 12px/1 var(--mono); color: var(--muted); }
+.dot { width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid var(--c); }
+.dot.full { background: var(--c); }
+.dot.part { background: linear-gradient(90deg, var(--c) 50%, transparent 50%); }
+.task-body { padding: 4px 4px 16px; font: 400 13.5px/1.5 var(--display); }
+.task-body table { font-size: 13px; }
+.task-body td, .task-body th { padding: 5px 8px; white-space: normal; }
+.task-body td:first-child { font-family: var(--mono); font-size: 12px; overflow-wrap: anywhere; }
+.yes { color: var(--ink); font-weight: 600; }
+.no { color: var(--muted); }
+
+.callout { border-left: 3px solid var(--ink); padding: 2px 0 2px 18px; margin: 26px 0; }
+.repro { font: 400 13px/1.6 var(--mono); background: var(--sheet); border: 1px solid var(--rule); border-radius: 10px; padding: 16px 18px; overflow-x: auto; white-space: pre; }
+footer { margin-top: 72px; padding-top: 18px; border-top: 1px solid var(--rule); font: 400 14px/1.6 var(--display); color: var(--muted); }
+
+@media (max-width: 640px) {
+  body { font-size: 17px; }
+  .strip-row { grid-template-columns: 1fr; }
+  .strip-note { grid-column: 1; }
+  .sheet { padding: 16px 14px 14px; }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="page">
+<header class="col">
+  <div class="kicker">Repo2Txt · lab notes · November 2026</div>
+  <h1>What reaches the model</h1>
+  <p class="dek">A coding agent works only from what fits in its context. On <span data-bind="tasks"></span> real issues, from <span data-bind="repos"></span> repositories the methods never saw, this measures how much of the code each fix needed actually reaches the model, at 8,000, 32,000 and 128,000 tokens, and what changes that.</p>
+  <div class="byline"><span>Nason</span><span>14–15 November 2026</span><span><a href="https://github.com/NasonZ/Repo2Txt">Code and data</a></span><span><a href="https://github.com/NasonZ/Repo2Txt/blob/main/docs/report-2026-11-14.md">Full report</a></span></div>
+</header>
+
+<figure class="wide" id="hero">
+  <div class="sheet">
+    <div class="fig-head">
+      <p class="fig-title">One issue, three ways of filling the context window</p>
+      <div class="seg" role="group" aria-label="Token budget" data-budget-group="hero"></div>
+    </div>
+    <div class="task-line" id="hero-task"></div>
+    <div id="hero-strips"></div>
+    <div class="legend" id="hero-legend"></div>
+  </div>
+  <figcaption class="col"><span class="t">Each bar is the budget; each block is a file, as wide as its tokens.</span> Solid blocks are files the fix needed; pale blocks are files that were not needed. The lexical ranker fills the window with whatever shares the issue's words; the model chooses a shorter list. The bottom bar is the ceiling: the needed files and nothing else.</figcaption>
+</figure>
+
+<section class="col">
+  <ul class="findings" id="findings">
+    <li><span><b>Most of the needed code does not arrive.</b> At 32,000 tokens the default lexical ranker delivers <span class="num" data-bind="curve.bm25.32000.recall"></span> of the files a fix needed, and only <span class="num" data-bind="curve.bm25.32000.precision" data-fmt="pct"></span> of the files it delivers were needed.</span></li>
+    <li><span><b>A small model chooses better, once told why.</b> Claude Haiku 5.5, shown the directory tree and the ranker's leads, delivers <span class="num" data-bind="curve.llm.32000.recall"></span> at 32,000 tokens and <span class="num" data-bind="curve.llm.128000.recall"></span> at 128,000.</span></li>
+    <li><span><b>At small budgets, files are the wrong unit.</b> The lines a fix needed total about 2,000 tokens. Letting the model pick line ranges at 8,000 tokens raises the share of needed lines delivered from <span class="num" data-bind="curve.llm.8000.line"></span> to <span class="num" data-bind="curve.llm-lines.8000.line"></span>.</span></li>
+    <li><span><b>Most ideas did not survive measurement.</b> Search tools, merged runs, padding from the ranker and a score cut-off were each tried and removed. One looked like a failure of the idea and was a bug in the harness.</span></li>
+  </ul>
+</section>
+
+<section class="col">
+  <h2>What is measured</h2>
+  <p>Each issue comes from <a href="https://arxiv.org/abs/2602.05892">ContextBench</a>, with the lines of code annotators judged necessary to resolve it. A method is given the issue's text and the repository at that commit, and returns files in order. They are kept, in that order, while they fit the budget. The fix itself is never shown.</p>
+  <p><b>Recall</b> is the share of the needed files that were kept. If an issue needs four files and a method's selection holds three of them within 32,000 tokens, its recall at 32k is 0.75. Recall alone is easy to game: return everything, and a large enough budget scores 1.0. So <b>precision</b> sits beside it, the share of kept files that were needed. The <b>ceiling</b> is the needed files themselves: below 1.0 whenever they do not fit.</p>
+  <p>Methods were tuned on 281 issues from 40 repositories. Everything on this page, unless marked otherwise, is from <span data-bind="tasks"></span> further issues from <span data-bind="repos"></span> other repositories, held out until the methods were fixed and run once.</p>
+</section>
+
+<figure class="wide">
+  <div class="sheet">
+    <div class="fig-head">
+      <p class="fig-title" id="curve-title">Share of the needed files that reach the model</p>
+      <div class="seg" role="group" aria-label="Measure" id="curve-measure"></div>
+    </div>
+    <div id="curve"></div>
+  </div>
+  <figcaption class="col"><span class="t">Held-out issues, with 95% intervals from resampling whole repositories.</span> Switch the measure to see the two routes to the same recall at 128,000 tokens: the model delivers a short, accurate list, the ranker a long and mostly unneeded one.</figcaption>
+</figure>
+
+<section class="col">
+  <h2>Lexical ranking: three things a word count misses</h2>
+  <p>BM25 scores a file by the words it shares with the issue. But issues are not search queries. They name files outright, quote identifiers in backticks, and describe behaviour that tests and documentation also describe. Three signals were added: a file the issue names comes first; a file that defines a named identifier is lifted above files that merely use it; and tests, examples and prose rank below code.</p>
+  <p>On the held-out issues they take recall at 32,000 tokens from <span class="num" data-bind="curve.bm25-plain.32000.recall"></span> to <span class="num" data-bind="curve.bm25.32000.recall"></span>, for no cost at run time. This is the default for <code>repo2txt select</code>. Its weakness is precision: it fills whatever budget it is given.</p>
+
+  <h2>Why the model first stopped at three files</h2>
+  <p>The first model selector showed Claude Haiku 5.5 the directory tree with token counts and let it choose. It named a median of three files, used 14,000 of 32,000 tokens, and stopped. Of the 233 needed files it missed on the tuning issues, a third were in the lexical ranker's top 30, which the model never saw. Seeing a file in the tree barely helped: it found 43% of the needed files shown to it and 39% of those hidden in collapsed directories.</p>
+  <p>Two changes fixed most of this. The model was shown the ranker's top 30 beside the request, and the prompt was rewritten to say why completeness matters: whoever reads the selection works from those files alone, so a file they need and were not given stops them, while a file they did not need costs only its tokens.</p>
+</section>
+
+<figure class="wide">
+  <div class="sheet">
+    <div class="fig-head"><p class="fig-title">What each change did to recall at 32,000 tokens</p></div>
+    <div id="changes"></div>
+  </div>
+  <figcaption class="col"><span class="t">Tuning issues, paired on the same tasks, with 95% intervals.</span> Filled dots are in the shipped version. The shortlist did nothing until the prompt asked for completeness, and then it was worth four points.</figcaption>
+</figure>
+
+<section class="col">
+  <h2>The tool that looked useless</h2>
+  <p>Every trained code-search agent published this year searches and reads. So two tools were added: a pattern search over file contents, and an outline of what a file defines. Recall fell by six points. Before recording that, ten of the transcripts where it fell were read.</p>
+</section>
+
+<figure class="wide" id="steps-figure">
+  <div class="sheet">
+    <div class="steps-head">
+      <div class="seg" role="group" aria-label="Transcript" id="steps-pick"></div>
+      <div class="stepper"><button type="button" id="step-prev" aria-label="Previous round">Previous</button><span id="step-pos"></span><button type="button" id="step-next" aria-label="Next round">Next</button></div>
+    </div>
+    <div class="task-line" id="steps-task"></div>
+    <div class="transcript" id="steps-body" aria-live="polite"></div>
+    <div class="verdict" id="steps-verdict"></div>
+  </div>
+  <figcaption class="col"><span class="t">Two complete runs, round by round.</span> Tool results are shortened. The failing run is the original tools version, rerun from its commit on a tuning issue from jackson-databind.</figcaption>
+</figure>
+
+<section class="col">
+  <p>Every “no match” in the failing run was reported without the file being read: the search tool treated a file path as a directory and looked inside it for files. The files did contain the terms, and three of them were the files the fix needed. The model kept searching until its rounds ran out, then wrote that it had selected six files. It had selected none.</p>
+  <p>With the search fixed and a round kept for selecting, the tools recovered and then tied the kept selector at one and a half times the cost, probably because the shortlist already does a search's work before the model starts. They were removed. Had the transcripts not been read, this would have been recorded as “tools do not help”.</p>
+
+  <h2>Lines, not files</h2>
+  <p>At 8,000 tokens even a perfect choice of files reaches only part of what is needed, because the needed files often do not fit whole. But the needed lines themselves total about 2,000 tokens. Choosing lines instead of files could almost close that gap, if the right lines can be found.</p>
+  <p>Finding them by the issue's words failed: the lines a fix needs often do not contain those words, and focused views dropped them. What worked was asking the model again. It first chooses files at four times the budget, then sees outlines of those files, every block with its line range and size, and picks the ranges to read. The rest of the budget goes to its chosen files whole.</p>
+</section>
+
+<figure class="wide">
+  <div class="sheet">
+    <div class="fig-head"><p class="fig-title">Share of the needed lines delivered at 8,000 tokens</p></div>
+    <div id="lines"></div>
+  </div>
+  <figcaption class="col"><span class="t">Held-out issues.</span> <code>select --method llm --lines</code> prints line ranges that <code>pack --stdin</code> reads.</figcaption>
+</figure>
+
+<section class="col">
+  <h2>Every issue</h2>
+  <p>The averages above come from these. Each row shows an issue, what the fix needed, and what each method delivered. The dots read, left to right: lexical ranking, then the model; at 8,000 tokens a third dot shows the model's line ranges. A filled dot means every needed file arrived, a half-filled one that some did.</p>
+</section>
+
+<figure class="wide">
+  <div class="sheet">
+    <div class="browser-controls">
+      <input type="search" id="task-filter" placeholder="Filter by repository, language or words in the issue" aria-label="Filter issues">
+      <div class="seg" role="group" aria-label="Token budget" data-budget-group="browser"></div>
+    </div>
+    <div class="small" id="task-count" style="margin-bottom:8px"></div>
+    <div class="task-list" id="task-list"></div>
+  </div>
+</figure>
+
+<section class="col">
+  <h2>What could overturn this</h2>
+  <p><b>Python.</b> Half the tuning issues were Python, and the ranker's signals recognise a fixed list of declaration keywords. The held-out set is more mixed, and the gap between Python and the rest is the first place to look for a signal fitted to its training data.</p>
+  <p><b>One run, one model.</b> Each configuration was run once with one small model. How much its choices vary from run to run, and whether a stronger model chooses better, were not measured.</p>
+  <p><b>Memory of the fix.</b> Whether the model had seen these repositories and their fixes in training was not measured. The lexical rows are unaffected; the model rows could be.</p>
+  <p><b>What “needed” means.</b> The needed files are sufficient, not minimal, so precision is understated. And the earliest twenty-issue pilot, run before the split existed, included issues from four repositories that were later held out; no tuning decision was made on it.</p>
+
+  <h2>Reproduce it</h2>
+  <div class="repro">uv sync --all-extras
+python -m bench.run --split test --unseal --methods smallest,bm25-plain,bm25,oracle,oracle-lines,llm --out test.jsonl
+python -m bench.run --split test --unseal --methods llm-lines --budgets 8k --out test.jsonl
+python -m bench.report test.jsonl</div>
+  <p class="small" style="margin-top:12px">The model runs need <code>LLM_MODEL</code>, <code>LLM_API_KEY</code> and <code>LLM_BASE_URL</code>. One full held-out run used about <span data-bind="cost"></span>.</p>
+
+  <footer>Repo2Txt is open source under the MIT licence. Sources: Li et al., <a href="https://arxiv.org/abs/2602.05892">ContextBench</a> (2026); Xia et al., <a href="https://arxiv.org/abs/2407.01489">Agentless</a> (2024); Chroma, <a href="https://www.trychroma.com/research/context-1">Context-1</a> (2026); Anthropic, <a href="https://www.anthropic.com/engineering/writing-tools-for-agents">Writing effective tools for agents</a> (2025).</footer>
+</section>
+</div>
+
+<script id="data" type="application/json">__DATA__</script>
+<script>
+(function () {
+  const D = JSON.parse(document.getElementById("data").textContent);
+  const BUDGETS = [8000, 32000, 128000];
+  const fmt = (v, d = 2) => (v == null ? "–" : Number(v).toFixed(d));
+  const k = b => b / 1000 + "k";
+  const NS = "http://www.w3.org/2000/svg";
+  const el = (tag, attrs = {}, text) => {
+    const n = document.createElementNS(NS, tag);
+    for (const [a, v] of Object.entries(attrs)) n.setAttribute(a, v);
+    if (text != null) n.textContent = text;
+    return n;
+  };
+  const css = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  const get = path => path.split(".").reduce((o, key) => (o == null ? o : o[key]), D);
+
+  // Numbers in the prose come from the data, so they cannot drift from the charts.
+  const usage = (D.cost_tokens || {});
+  D.cost = usage.input ? "$" + (usage.input / 1e6 + 5 * usage.output / 1e6).toFixed(0) + " of model calls at assumed prices" : "–";
+  document.querySelectorAll("[data-bind]").forEach(n => {
+    const v = get(n.dataset.bind);
+    if (v == null) n.textContent = "–";
+    else if (n.dataset.fmt === "pct") n.textContent = Math.round(100 * v) + "%";
+    else n.textContent = typeof v === "number" && v < 2 ? fmt(v) : v.toLocaleString("en-GB");
+  });
+
+  function segmented(container, options, initial, onPick) {
+    container.innerHTML = "";
+    options.forEach(([value, label]) => {
+      const b = document.createElement("button");
+      b.type = "button"; b.textContent = label; b.dataset.value = value;
+      b.setAttribute("aria-pressed", String(value === initial));
+      b.addEventListener("click", () => {
+        container.querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+        onPick(value);
+      });
+      container.appendChild(b);
+    });
+  }
+
+  const METHOD = {
+    bm25: { name: "Lexical default", note: "repo2txt select", c: "--lex" },
+    llm: { name: "Model selector", note: "select --method llm", c: "--model" },
+    "llm-lines": { name: "Model, line ranges", note: "select --method llm --lines", c: "--model" },
+    "bm25-plain": { name: "Plain BM25", note: "reference", c: "--ceil" },
+    oracle: { name: "Ceiling", note: "the needed files", c: "--ceil" },
+    "oracle-lines": { name: "Ceiling", note: "the needed lines", c: "--ceil" },
+    smallest: { name: "Smallest files first", note: "floor", c: "--ceil" },
+  };
+
+  /* ---------- Hero: context-window strips ---------- */
+  const heroTask = D.examples.find(e => Object.values(e.picks).some(p => p.all));
+  function drawHero(budget) {
+    const box = document.getElementById("hero-strips");
+    box.innerHTML = "";
+    if (!heroTask) return;
+    const needed = new Set(heroTask.needed.map(n => n.path));
+    document.getElementById("hero-task").innerHTML =
+      `<b>${heroTask.repo}</b> · ${escapeHtml(heroTask.title)} · ${heroTask.files.toLocaleString("en-GB")} files, ${heroTask.tokens.toLocaleString("en-GB")} tokens · the fix needed ${heroTask.needed.length} files`;
+    const rows = [["bm25", heroTask.picks["bm25@" + budget]], ["llm", heroTask.picks["llm@" + budget]]];
+    rows.forEach(([m, pick]) => {
+      if (!pick || !pick.all) return;
+      const row = document.createElement("div"); row.className = "strip-row";
+      const used = pick.all.reduce((s, [, t]) => s + t, 0);
+      const hits = pick.all.filter(([p]) => needed.has(p)).length;
+      row.innerHTML = `<div class="strip-name">${METHOD[m].name}<small>${METHOD[m].note}</small></div>`;
+      const strip = document.createElement("div"); strip.className = "strip";
+      strip.style.setProperty("--c", `var(${METHOD[m].c})`);
+      pick.all.forEach(([p, t]) => {
+        const i = document.createElement("i");
+        i.className = needed.has(p) ? "hit" : "miss";
+        i.style.width = (100 * t / budget) + "%";
+        i.title = `${p} · ${t.toLocaleString("en-GB")} tokens${needed.has(p) ? " · needed" : ""}`;
+        strip.appendChild(i);
+      });
+      row.appendChild(strip);
+      const note = document.createElement("div"); note.className = "strip-note";
+      note.innerHTML = `<b>${hits} of ${needed.size}</b> needed files, in ${pick.all.length} files and ${used.toLocaleString("en-GB")} of ${budget.toLocaleString("en-GB")} tokens`;
+      row.appendChild(note);
+      box.appendChild(row);
+    });
+    const row = document.createElement("div"); row.className = "strip-row";
+    row.innerHTML = `<div class="strip-name">Ceiling<small>the needed files themselves</small></div>`;
+    const strip = document.createElement("div"); strip.className = "strip";
+    strip.style.setProperty("--c", "var(--ceil)");
+    let used = 0, fits = 0;
+    heroTask.needed.slice().sort((a, b) => a.tokens - b.tokens).forEach(n => {
+      if (used + n.tokens > budget) return;
+      used += n.tokens; fits++;
+      const i = document.createElement("i"); i.className = "hit";
+      i.style.width = (100 * n.tokens / budget) + "%";
+      i.title = `${n.path} · ${n.tokens.toLocaleString("en-GB")} tokens`;
+      strip.appendChild(i);
+    });
+    row.appendChild(strip);
+    const note = document.createElement("div"); note.className = "strip-note";
+    note.innerHTML = `<b>${fits} of ${needed.size}</b> fit whole, in ${used.toLocaleString("en-GB")} tokens`;
+    row.appendChild(note);
+    box.appendChild(row);
+    document.getElementById("hero-legend").innerHTML =
+      `<span><i class="sw" style="background:var(--model)"></i>needed, delivered</span><span><i class="sw" style="background:color-mix(in srgb, var(--model) 22%, var(--sheet))"></i>delivered, not needed</span><span>Hover a block for the file</span>`;
+  }
+  document.querySelectorAll('[data-budget-group="hero"]').forEach(g =>
+    segmented(g, BUDGETS.map(b => [b, k(b) + " tokens"]), 32000, b => drawHero(+b)));
+  drawHero(32000);
+
+  /* ---------- Recall by budget ---------- */
+  const MEASURES = [["recall", "Recall"], ["precision", "Precision"], ["tokens", "Tokens used"]];
+  function drawCurve(measure) {
+    const box = document.getElementById("curve"); box.innerHTML = "";
+    const titles = { recall: "Share of the needed files that reach the model", precision: "Share of what was delivered that was needed", tokens: "Tokens delivered, of the budget" };
+    document.getElementById("curve-title").textContent = titles[measure];
+    const series = ["oracle", "llm", "bm25", "bm25-plain"].filter(m => D.curve[m]);
+    const W = 940, H = 380, L = 64, R = 210, T = 16, B = 44;
+    const pw = W - L - R, ph = H - T - B;
+    const maxV = measure === "tokens" ? 128000 : 1;
+    const x = i => L + pw * i / (BUDGETS.length - 1);
+    const y = v => T + ph * (1 - v / maxV);
+    const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, width: "100%", role: "img", "aria-label": titles[measure] });
+    const ticks = measure === "tokens" ? [0, 32000, 64000, 96000, 128000] : [0, 0.25, 0.5, 0.75, 1];
+    ticks.forEach(v => {
+      svg.appendChild(el("line", { x1: L, x2: L + pw, y1: y(v), y2: y(v), stroke: css("--rule") }));
+      svg.appendChild(el("text", { x: L - 10, y: y(v) + 4, "text-anchor": "end", "font-size": 12, fill: css("--muted") },
+        measure === "tokens" ? (v ? k(v) : "0") : String(v)));
+    });
+    BUDGETS.forEach((b, i) => svg.appendChild(el("text", { x: x(i), y: H - 14, "text-anchor": "middle", "font-size": 12.5, fill: css("--muted") }, k(b) + " tokens")));
+    const labels = [];
+    series.forEach(m => {
+      const c = css(METHOD[m].c);
+      const pts = BUDGETS.map((b, i) => [x(i), y(D.curve[m][b][measure]), D.curve[m][b]]);
+      if (measure === "recall" && (m === "llm" || m === "bm25")) {
+        const band = pts.map(([px, , d]) => `${px},${y(d.hi)}`).concat(pts.slice().reverse().map(([px, , d]) => `${px},${y(d.lo)}`));
+        svg.appendChild(el("polygon", { points: band.join(" "), fill: c, "fill-opacity": 0.1 }));
+      }
+      svg.appendChild(el("polyline", { points: pts.map(([a, b]) => `${a},${b}`).join(" "), fill: "none", stroke: c, "stroke-width": m === "llm" ? 2.5 : 2, "stroke-dasharray": m === "oracle" ? "6 5" : (m === "bm25-plain" ? "2 4" : "none") }));
+      pts.forEach(([px, py, d], i) => {
+        const dot = el("circle", { cx: px, cy: py, r: 5, fill: c, stroke: css("--sheet"), "stroke-width": 2 });
+        const tip = el("title", {}, `${METHOD[m].name} at ${k(BUDGETS[i])}: recall ${fmt(d.recall)} (${fmt(d.lo)}–${fmt(d.hi)}), precision ${fmt(d.precision)}, ${d.tokens.toLocaleString("en-GB")} tokens, ${d.files} files`);
+        dot.appendChild(tip); svg.appendChild(dot);
+      });
+      const last = D.curve[m][128000][measure];
+      labels.push([y(last), m, last, c]);
+    });
+    labels.sort((a, b) => a[0] - b[0]);
+    for (let i = 1; i < labels.length; i++) labels[i][0] = Math.max(labels[i][0], labels[i - 1][0] + 34);
+    labels.forEach(([ly, m, v, c]) => {
+      svg.appendChild(el("rect", { x: x(2) + 14, y: ly - 7, width: 10, height: 3, rx: 1.5, fill: c }));
+      svg.appendChild(el("text", { x: x(2) + 30, y: ly - 1, "font-size": 13, "font-weight": 600, fill: css("--ink") }, METHOD[m].name));
+      svg.appendChild(el("text", { x: x(2) + 30, y: ly + 15, "font-size": 12, fill: css("--muted") },
+        measure === "tokens" ? Math.round(v).toLocaleString("en-GB") + " at 128k" : fmt(v) + " at 128k"));
+    });
+    box.appendChild(svg);
+  }
+  segmented(document.getElementById("curve-measure"), MEASURES, "recall", drawCurve);
+  drawCurve("recall");
+
+  /* ---------- What each change did ---------- */
+  (function drawChanges() {
+    const box = document.getElementById("changes");
+    const rows = D.changes;
+    const W = 940, rowH = 44, L = 330, R = 70, lo = -0.15, hi = 0.25;
+    const groups = [["lexical", "Lexical ranking, 281 issues"], ["model", "Model selector, 100 issues"]];
+    const H = 30 + rows.length * rowH + groups.length * 30 + 30;
+    const x = v => L + (W - L - R) * (v - lo) / (hi - lo);
+    const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, width: "100%", role: "img", "aria-label": "Change in recall for each change tried" });
+    let yy = 10; const top = yy;
+    const marks = [];
+    groups.forEach(([g, name]) => {
+      yy += 24; marks.push(el("text", { x: 0, y: yy, "font-size": 13.5, "font-weight": 600, fill: css("--ink") }, name)); yy += 8;
+      rows.filter(r => r.group === g).forEach(r => {
+        yy += rowH; const cy = yy - rowH / 2;
+        marks.push(el("text", { x: 0, y: cy - 1, "font-size": 13.5, fill: css("--ink") }, r.label));
+        marks.push(el("text", { x: 0, y: cy + 15, "font-size": 12, fill: css("--muted") }, "vs " + r.versus));
+        const c = r.kept ? css("--model") : css("--muted");
+        marks.push(el("line", { x1: x(r.lo), x2: x(r.hi), y1: cy, y2: cy, stroke: c, "stroke-width": 2, "stroke-linecap": "round" }));
+        const dot = el("circle", { cx: x(r.d), cy, r: 6, fill: r.kept ? c : css("--sheet"), stroke: r.kept ? css("--sheet") : c, "stroke-width": 2 });
+        dot.appendChild(el("title", {}, `${r.label}: ${r.d >= 0 ? "+" : ""}${fmt(r.d)} (${fmt(r.lo)} to ${fmt(r.hi)}), ${r.tasks} issues`));
+        marks.push(dot);
+        marks.push(el("text", { x: W - R + 16, y: cy + 4, "font-size": 13, "font-weight": 600, fill: css("--ink") }, (r.d >= 0 ? "+" : "−") + fmt(Math.abs(r.d))));
+      });
+    });
+    [-0.1, 0, 0.1, 0.2].forEach(v => {
+      svg.appendChild(el("line", { x1: x(v), x2: x(v), y1: top, y2: yy + 6, stroke: v === 0 ? css("--muted") : css("--rule"), "stroke-width": v === 0 ? 1.5 : 1 }));
+      svg.appendChild(el("text", { x: x(v), y: yy + 24, "text-anchor": "middle", "font-size": 12, fill: css("--muted") }, v === 0 ? "0" : (v > 0 ? "+" : "−") + Math.abs(v).toFixed(1)));
+    });
+    marks.forEach(m => svg.appendChild(m));
+    box.appendChild(svg);
+  })();
+
+  /* ---------- Transcripts ---------- */
+  const T = D.transcripts;
+  const pickers = [["failing", "Search tools, as first built"], ["kept", "Kept selector"]].filter(([key]) => T[key]);
+  let current = pickers.length ? pickers[0][0] : null, step = 0;
+  function short(s, n = 420) { s = String(s); return s.length > n ? s.slice(0, n) + " …" : s; }
+  function argsText(a) {
+    return Object.entries(a).map(([key, v]) => `${key}: ${Array.isArray(v) ? "[" + v.length + " paths] " + v.slice(0, 3).join(", ") + (v.length > 3 ? ", …" : "") : JSON.stringify(v)}`).join("\n  ");
+  }
+  function drawSteps() {
+    if (!current) return;
+    const t = T[current]; const steps = t.steps;
+    const body = document.getElementById("steps-body"); body.innerHTML = "";
+    const s = steps[step];
+    const needed = new Set(t.gold);
+    document.getElementById("steps-task").innerHTML = `<b>${t.repo}</b> · budget ${t.budget.toLocaleString("en-GB")} tokens · the fix needed ${t.gold.length} files`;
+    s.calls.forEach((c, i) => {
+      const who = document.createElement("div"); who.className = "who"; who.textContent = "Model calls " + c.tool; body.appendChild(who);
+      const call = document.createElement("div"); call.className = "call"; call.textContent = "  " + argsText(c.args); body.appendChild(call);
+      if (s.results[i] != null) {
+        const res = document.createElement("div");
+        const txt = s.results[i];
+        res.className = "res" + (/^No file under|matches nothing|^Nothing in/.test(txt) ? " bad" : "");
+        res.textContent = "→ " + short(txt);
+        body.appendChild(res);
+      }
+    });
+    if (s.say) {
+      const who = document.createElement("div"); who.className = "who"; who.textContent = "Model says"; body.appendChild(who);
+      const say = document.createElement("div"); say.className = "say"; say.textContent = short(s.say, 700); body.appendChild(say);
+    }
+    document.getElementById("step-pos").textContent = `Round ${step + 1} of ${steps.length}`;
+    document.getElementById("step-prev").disabled = step === 0;
+    document.getElementById("step-next").disabled = step === steps.length - 1;
+    const found = t.selected.filter(p => needed.has(p)).length;
+    document.getElementById("steps-verdict").innerHTML = step === steps.length - 1
+      ? `<b>Result:</b> ${t.selected.length} files selected, ${found} of the ${t.gold.length} needed.`
+      : "";
+  }
+  if (current) {
+    segmented(document.getElementById("steps-pick"), pickers, current, v => { current = v; step = 0; drawSteps(); });
+    document.getElementById("step-prev").addEventListener("click", () => { step = Math.max(0, step - 1); drawSteps(); });
+    document.getElementById("step-next").addEventListener("click", () => { step = Math.min(T[current].steps.length - 1, step + 1); drawSteps(); });
+    drawSteps();
+  }
+
+  /* ---------- Lines at 8k ---------- */
+  (function drawLines() {
+    const box = document.getElementById("lines");
+    const rows = [["bm25", "Lexical default, whole files"], ["llm", "Model selector, whole files"], ["llm-lines", "Model selector, line ranges"], ["oracle", "Ceiling: the needed files whole"], ["oracle-lines", "Ceiling: the needed lines"]]
+      .filter(([m]) => D.curve[m] && D.curve[m][8000]);
+    const W = 940, rowH = 40, L = 290, R = 70;
+    const H = rows.length * rowH + 34;
+    const x = v => L + (W - L - R) * v;
+    const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, width: "100%", role: "img", "aria-label": "Share of the needed lines delivered at 8,000 tokens" });
+    [0, 0.25, 0.5, 0.75, 1].forEach(v => {
+      svg.appendChild(el("line", { x1: x(v), x2: x(v), y1: 0, y2: rows.length * rowH, stroke: css("--rule") }));
+      svg.appendChild(el("text", { x: x(v), y: rows.length * rowH + 20, "text-anchor": "middle", "font-size": 12, fill: css("--muted") }, String(v)));
+    });
+    rows.forEach(([m, name], i) => {
+      const d = D.curve[m][8000]; const cy = i * rowH + rowH / 2;
+      const c = m.startsWith("oracle") ? css("--ceil") : css(METHOD[m].c);
+      svg.appendChild(el("text", { x: 0, y: cy + 4, "font-size": 13.5, "font-weight": m === "llm-lines" ? 600 : 400, fill: css("--ink") }, name));
+      const bar = el("rect", { x: x(0), y: cy - 9, width: Math.max(2, x(d.line) - x(0)), height: 18, rx: 3, fill: c, "fill-opacity": m.startsWith("oracle") ? 0.35 : 1 });
+      bar.appendChild(el("title", {}, `${name}: ${fmt(d.line)} of the needed lines, ${d.tokens.toLocaleString("en-GB")} tokens`));
+      svg.appendChild(bar);
+      svg.appendChild(el("text", { x: W - R + 16, y: cy + 4, "font-size": 13, "font-weight": 600, fill: css("--ink") }, fmt(d.line)));
+    });
+    box.appendChild(svg);
+  })();
+
+  /* ---------- Task browser ---------- */
+  let browserBudget = 32000;
+  const list = document.getElementById("task-list");
+  const filter = document.getElementById("task-filter");
+  function dot(pick, color) {
+    if (!pick) return `<span class="dot" style="--c:var(--rule)" title="not run"></span>`;
+    const cls = pick.recall >= 0.999 ? "full" : pick.recall > 0 ? "part" : "";
+    return `<span class="dot ${cls}" style="--c:var(${color})" title="${fmt(pick.recall)} of needed files"></span>`;
+  }
+  function drawBrowser() {
+    const q = filter.value.trim().toLowerCase();
+    const shown = D.examples.filter(e => !q || (e.repo + " " + e.language + " " + e.title).toLowerCase().includes(q));
+    document.getElementById("task-count").textContent = `${shown.length} of ${D.examples.length} issues · budget ${k(browserBudget)} tokens`;
+    list.innerHTML = shown.slice(0, 400).map(e => {
+      const p = m => e.picks[m + "@" + browserBudget];
+      const lines = e.picks["llm-lines@8000"];
+      const rowsHtml = e.needed.map(n => {
+        const cell = m => { const pk = p(m); return pk ? (pk.hits.includes(n.path) ? '<span class="yes">delivered</span>' : '<span class="no">missed</span>') : "–"; };
+        return `<tr><td>${escapeHtml(n.path)}</td><td>${n.tokens.toLocaleString("en-GB")}</td><td>${cell("bm25")}</td><td>${cell("llm")}</td></tr>`;
+      }).join("");
+      const sum = m => { const pk = p(m); return pk ? `${pk.n} files, ${pk.tokens.toLocaleString("en-GB")} tokens` : "–"; };
+      return `<details class="task"><summary><span class="task-title">${escapeHtml(e.title) || "(untitled)"}<small>${e.repo} · ${e.language} · ${e.files.toLocaleString("en-GB")} files</small></span>
+        <span class="dots">${dot(p("bm25"), "--lex")}${dot(p("llm"), "--model")}${browserBudget === 8000 ? dot(lines, "--first") : ""}</span></summary>
+        <div class="task-body"><div class="tbl-wrap"><table><thead><tr><th>Needed file</th><th>Tokens</th><th>Lexical</th><th>Model</th></tr></thead><tbody>${rowsHtml}</tbody></table></div>
+        <p class="small" style="margin:8px 0 0">Lexical delivered ${sum("bm25")}. Model delivered ${sum("llm")}.${lines && browserBudget === 8000 ? ` With line ranges, ${fmt(lines.line)} of the needed lines.` : ""}</p></div></details>`;
+    }).join("");
+  }
+  document.querySelectorAll('[data-budget-group="browser"]').forEach(g =>
+    segmented(g, BUDGETS.map(b => [b, k(b)]), 32000, b => { browserBudget = +b; drawBrowser(); }));
+  filter.addEventListener("input", drawBrowser);
+  drawBrowser();
+
+  function escapeHtml(s) { return String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]); }
+
+  // Redraw the drawn charts when the theme changes, since they read colours from it.
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => location.reload());
+})();
+</script>

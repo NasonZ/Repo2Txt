@@ -26,3 +26,16 @@ def test_gold_is_checked_against_the_commit_before_scoring():
     assert gold.files == ["src/a.py", "assets/logo.png"]
     assert gold.unresolved == ["gone.py"]
     assert gold.filtered == ["assets/logo.png"]
+
+
+def test_line_recall_counts_only_the_needed_lines_that_were_shown():
+    from bench.packing import score_lines
+
+    spans = [["a.py", 10, 19], ["b.py", 1, 10]]
+    gold = ["a.py", "b.py"]
+
+    whole_a = score_lines({"a.py": None}, spans, gold)
+    part_b = score_lines({"b.py": set(range(1, 6)), "c.py": None}, spans, gold)
+
+    assert whole_a == {"line_recall": 0.5, "file_recall": 0.5}
+    assert part_b == {"line_recall": 0.25, "file_recall": 0.5}
