@@ -155,11 +155,17 @@ class Selector:
             result = handler(**call.arguments)
         except (TypeError, ValueError) as exc:
             return f"Bad arguments for {call.name}: {exc}. Nothing was changed."
-        # Every reply says where the budget stands, so the model can see what room is left.
+        # Every reply ends with the selection and the budget, so the model sees what it has
+        # chosen where it reads next. (Restating it in the system prompt instead would change
+        # the start of every request, which no prompt cache can reuse.)
         selection = self.selection
         left = selection.budget - selection.total
         used = f"{len(selection.paths)} files, {selection.total:,} of {selection.budget:,} tokens"
-        return f"{result}\n[Selected: {used}; {left:,} left]"
+        listed = ", ".join(selection.paths) if selection.paths else "nothing"
+        return (
+            f"{result}\n[Selected: {used}; {left:,} left]"
+            f"\n[Selection, most important first: {listed}]"
+        )
 
     def _report(self, change: Change) -> str:
         """Tell the model what its change did, in terms it can act on."""
