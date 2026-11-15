@@ -22,10 +22,22 @@ class Call:
 
 @dataclass
 class Reply:
+    """A model's turn.
+
+    `input_tokens` counts all input, cached or not; `cached_tokens` and `cache_write_tokens`
+    are the parts of it read from and written to a prompt cache, where the endpoint says.
+    `message`, when set, is the turn as the endpoint wants it back in the history, carrying
+    whatever reasoning state it must see again; otherwise the history is rebuilt from `text`
+    and `calls`.
+    """
+
     text: str
     calls: list[Call] = field(default_factory=list)
     input_tokens: int = 0
     output_tokens: int = 0
+    cached_tokens: int = 0
+    cache_write_tokens: int = 0
+    message: Any = None
 
 
 Complete = Callable[[list[dict[str, Any]], list[dict[str, Any]]], Reply]

@@ -23,11 +23,12 @@ from urllib.parse import urlparse
 
 from repo2txt import rank
 from repo2txt.api import HEAD_TOKENS, delivery_cost, line_items, repo_select
-from repo2txt.llm import ConfigError, LLMSettings, openai_complete
+from repo2txt.llm import ConfigError, LLMSettings
 from repo2txt.models import Problem, Repository
 from repo2txt.selection import fit
 from repo2txt.tokens import ENCODING, parse_budget
 
+from . import models
 from .metrics import Delivery, Gold, needed_lines, resolve, score
 from .tasks import REVISION, Task, repository, sample
 
@@ -38,15 +39,17 @@ class Usage:
     """Counts the model tokens a method spends, across every call it makes."""
 
     def __init__(self) -> None:
-        self.input = self.output = self.calls = 0
+        self.input = self.output = self.calls = self.cached = self.cache_written = 0
 
     def complete(self):
-        inner = openai_complete(LLMSettings.from_env())
+        inner = models.complete_for(models.selected()[1])
 
         def complete(messages, tools):
             reply = inner(messages, tools)
             self.input += reply.input_tokens
             self.output += reply.output_tokens
+            self.cached += reply.cached_tokens
+            self.cache_written += reply.cache_write_tokens
             self.calls += 1
             return reply
 
@@ -240,6 +243,8 @@ def run_task(task: Task, todo: list[tuple[str, int]], meta: dict) -> list[dict]:
                 },
                 "input_tokens": usage.input,
                 "output_tokens": usage.output,
+                "cached_tokens": usage.cached,
+                "cache_write_tokens": usage.cache_written,
                 "model_calls": usage.calls,
                 "seconds": round(time.time() - started, 2),
             }
@@ -267,12 +272,21 @@ def provenance(methods: list[str]) -> dict:
         "encoding": ENCODING,
     }
     if MODEL_METHODS & set(methods):
-        settings = LLMSettings.from_env()
+        name, model = models.selected()
         meta |= {
-            "model": settings.model,
-            "endpoint": urlparse(settings.base_url).netloc if settings.base_url else "openai",
-            "temperature": settings.temperature,
+            "model_spec": name,
+            "provider": model.provider,
+            "model": model.model,
+            "effort": model.effort,
+            "options": model.options,
         }
+        if model.provider == "openai-compat":
+            settings = LLMSettings.from_env()
+            meta |= {
+                "model": settings.model,
+                "endpoint": urlparse(settings.base_url).netloc if settings.base_url else "openai",
+                "temperature": settings.temperature,
+            }
     return meta
 
 
