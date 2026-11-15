@@ -2,176 +2,271 @@
 
     uv run python -m bench.run --tasks 20 --methods smallest,bm25,oracle --budgets 8k,32k,128k
 
+`bm25`, `llm` and `llm-lines` call `repo_select`, the function behind `repo2txt select`, so
+what is measured is what the command delivers. The other methods are references. Every
+delivery is costed by the library's own packing cost and scored against each definition of
+what the task needs (see `Task.golds`).
+
 Rows are appended to a JSONL file as they finish, and rows already there are skipped, so a
-run can be stopped and resumed.
+run can be stopped and resumed. Each row records the code, data and model it came from.
 """
 
 import argparse
+import hashlib
 import json
-import os
 import subprocess
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from urllib.parse import urlparse
 
 from repo2txt import rank
-from repo2txt.api import select_lines
-from repo2txt.llm import LLMSettings, openai_complete
-from repo2txt.models import Repository
+from repo2txt.api import HEAD_TOKENS, delivery_cost, line_items, repo_select
+from repo2txt.llm import ConfigError, LLMSettings, openai_complete
+from repo2txt.models import Problem, Repository
 from repo2txt.selection import fit
-from repo2txt.selector import Selector
-from repo2txt.tokens import parse_budget
+from repo2txt.tokens import ENCODING, parse_budget
 
-from . import packing
-from .metrics import Gold, resolve, score
-from .tasks import Task, repository, sample
+from .metrics import Delivery, Gold, needed_lines, resolve, score
+from .tasks import REVISION, Task, repository, sample
 
-# A method returns ranked paths and what it cost: (paths, input tokens, output tokens).
-Method = Callable[[Repository, Task, Gold, int], tuple[list[str], int, int]]
+ROOT = Path(__file__).resolve().parent.parent
 
 
-def bm25_plain(repo: Repository, task: Task, gold: Gold, budget: int) -> tuple[list[str], int, int]:
+class Usage:
+    """Counts the model tokens a method spends, across every call it makes."""
+
+    def __init__(self) -> None:
+        self.input = self.output = self.calls = 0
+
+    def complete(self):
+        inner = openai_complete(LLMSettings.from_env())
+
+        def complete(messages, tools):
+            reply = inner(messages, tools)
+            self.input += reply.input_tokens
+            self.output += reply.output_tokens
+            self.calls += 1
+            return reply
+
+        return complete
+
+
+# A method returns what it delivers within `room` tokens.
+Method = Callable[[Repository, Task, dict[str, Gold], int, Usage], Delivery]
+
+
+def _fitted(repo: Repository, ranked: list[str], room: int) -> Delivery:
+    return dict.fromkeys(fit(ranked, repo, room)[0])
+
+
+def _parse(items: list[str]) -> Delivery:
+    """`repo_select` items, `path` or `path:first-last`, as a delivery."""
+    delivered: Delivery = {}
+    for item in items:
+        path, _, span = item.rpartition(":")
+        first, _, last = span.partition("-")
+        if path and first.isdigit() and last.isdigit():
+            lines = delivered.setdefault(path, set())
+            if lines is not None:
+                lines.update(range(int(first), int(last) + 1))
+        else:
+            delivered[item] = None
+    return delivered
+
+
+def _selected(repo, task, room, usage, **options) -> Delivery:
+    try:
+        result = repo_select(repo, task.query, room + HEAD_TOKENS, **options)
+    except ConfigError:
+        raise
+    except Problem:  # nothing matched, or nothing fitted: an empty delivery
+        return {}
+    return _parse([f.path for f in result.files])
+
+
+def bm25(repo, task, gold, room, usage):
+    return _selected(repo, task, room, usage, method="bm25")
+
+
+def llm(repo, task, gold, room, usage):
+    return _selected(repo, task, room, usage, method="llm", complete=usage.complete())
+
+
+def llm_lines(repo, task, gold, room, usage):
+    return _selected(repo, task, room, usage, method="llm", complete=usage.complete(), lines=True)
+
+
+def bm25_plain(repo, task, gold, room, usage):
     """BM25 alone, as a reference point for the signals added to it."""
-    return [path for path, _ in rank.bm25(repo, task.query, boosts=False)], 0, 0
+    return _fitted(repo, [p for p, _ in rank.bm25(repo, task.query, boosts=False)], room)
 
 
-def bm25(repo: Repository, task: Task, gold: Gold, budget: int) -> tuple[list[str], int, int]:
-    return [path for path, _ in rank.bm25(repo, task.query)], 0, 0
-
-
-def smallest(repo: Repository, task: Task, gold: Gold, budget: int) -> tuple[list[str], int, int]:
+def smallest(repo, task, gold, room, usage):
     """The floor: as many files as fit, ignoring the question."""
     repo.count()
-    return sorted(repo.files, key=lambda p: (repo.files[p].tokens, p)), 0, 0
+    return _fitted(repo, sorted(repo.files, key=lambda p: (repo.files[p].tokens, p)), room)
 
 
-def oracle(repo: Repository, task: Task, gold: Gold, budget: int) -> tuple[list[str], int, int]:
-    """The ceiling: the gold files themselves, smallest first, as far as the budget allows."""
-    readable = [p for p in gold.files if p in repo.files]
-    repo.count(readable)
-    return sorted(readable, key=lambda p: repo.files[p].tokens), 0, 0
+def oracle_files(kind: str) -> Method:
+    def run(repo, task, gold, room, usage):
+        """The gold files themselves, smallest first: the ceiling for whole files."""
+        readable = [p for p in gold[kind].files if p in repo.files]
+        repo.count(readable)
+        return _fitted(repo, sorted(readable, key=lambda p: (repo.files[p].tokens, p)), room)
+
+    return run
 
 
-_chosen: dict[tuple[str, int], tuple[list[str], int, int]] = {}
+def oracle_lines(kind: str) -> Method:
+    def run(repo, task, gold, room, usage):
+        """The needed lines themselves, cheapest run of lines first: the ceiling for ranges.
+
+        Greedy, so close to the best possible rather than provably the best.
+        """
+        readable = [p for p in gold[kind].files if p in repo.files]
+        runs = []
+        for path, lines in needed_lines(task.golds()[kind], readable).items():
+            size = len(repo.files[path].text.split("\n"))
+            lines = {n for n in lines if 1 <= n <= size}
+            for item, cost in line_items(repo, path, lines) if lines else []:
+                first, last = map(int, item.rpartition(":")[2].split("-"))
+                runs.append((cost, path, first, last))
+        delivered: Delivery = {}
+        used = 0
+        for _, path, first, last in sorted(runs):
+            new = (delivered.get(path) or set()) | set(range(first, last + 1))
+            before = delivery_cost(repo, path, delivered[path]) if path in delivered else 0
+            change = delivery_cost(repo, path, new) - before
+            if used + change <= room:
+                delivered[path], used = new, used + change
+        return delivered
+
+    return run
 
 
-def llm(repo: Repository, task: Task, gold: Gold, budget: int) -> tuple[list[str], int, int]:
-    key = (task.id, budget)
-    if key not in _chosen:
-        selector = Selector(repo, budget, openai_complete(LLMSettings.from_env()))
-        selector.ask(task.query)
-        _chosen[key] = (selector.selection.paths, selector.input_tokens, selector.output_tokens)
-    return _chosen[key]
-
-
-def llm_lines(repo: Repository, task: Task, gold: Gold, budget: int):
-    """The model's choice at four times the budget, narrowed to line ranges that fit.
-
-    Only the second stage's tokens are counted here; the first stage is the llm row at 4x.
-    """
-    chosen, _, _ = llm(repo, task, gold, budget * 4)
-    usage = [0, 0]
-
-    def complete(messages, tools):
-        reply = openai_complete(LLMSettings.from_env())(messages, tools)
-        usage[0] += reply.input_tokens
-        usage[1] += reply.output_tokens
-        return reply
-
-    items = select_lines(repo, task.query, budget, complete, chosen=chosen)
-    return _shown(items), sum(cost for _, cost in items), usage[0], usage[1]
-
-
-def oracle_lines(repo: Repository, task: Task, gold: Gold, budget: int):
-    """The needed lines themselves, smallest span first: the ceiling for any packing."""
-    shown, used = packing.oracle_lines(repo, task.spans, gold.files, budget)
-    return shown, used, 0, 0
-
-
-def _shown(items: list[tuple[str, int]]) -> dict[str, set[int] | None]:
-    shown: dict[str, set[int] | None] = {}
-    for item, _ in items:
-        path, _, span = item.rpartition(":")
-        if path and "-" in span and span.replace("-", "").isdigit():
-            first, last = (int(x) for x in span.split("-"))
-            if shown.get(path, set()) is not None:
-                shown.setdefault(path, set()).update(range(first, last + 1))
-        else:
-            shown[item] = None
-    return shown
-
-
-# Methods scored by the lines they show, not by whole files kept in rank order.
-LINE_RUNNERS = {"llm-lines": llm_lines, "oracle-lines": oracle_lines}
-
-
+GOLDS = ("annotated", "edited", "explored")
 RUNNERS: dict[str, Method] = {
     "smallest": smallest,
     "bm25-plain": bm25_plain,
     "bm25": bm25,
-    "oracle": oracle,
     "llm": llm,
+    "llm-lines": llm_lines,
+    **{f"oracle:{k}": oracle_files(k) for k in GOLDS},
+    **{f"oracle-lines:{k}": oracle_lines(k) for k in GOLDS},
 }
+MODEL_METHODS = {"llm", "llm-lines"}
 
 
-def run_task(number: int, task: Task, todo: list[tuple[str, int]], meta: dict) -> list[dict]:
+def _ranges(lines: set[int]) -> list[list[int]]:
+    out: list[list[int]] = []
+    for n in sorted(lines):
+        if out and n == out[-1][1] + 1:
+            out[-1][1] = n
+        else:
+            out.append([n, n])
+    return out
+
+
+def run_task(task: Task, todo: list[tuple[str, int]], meta: dict) -> list[dict]:
+    base = {
+        "task": task.id,
+        "repo": task.repo,
+        "language": task.language,
+        "source": task.source,
+        "split": task.split,
+        "run": meta,
+    }
     try:
         repo, names = repository(task)
     except Exception as exc:
-        print(f"[{number}] {task.id}: could not read {task.repo}: {exc}", flush=True)
-        return []
-    gold = resolve(task.gold, names, set(repo.files))
-    if not gold.files:
-        print(f"[{number}] {task.id}: no gold file exists at the commit; skipped", flush=True)
-        return []
+        reason = f"could not read {task.repo}: {type(exc).__name__}: {exc}"
+        return [
+            base | {"method": m, "budget": b, "status": "skipped", "error": reason} for m, b in todo
+        ]
+    readable = set(repo.files)
+    gold = {
+        kind: resolve(sorted({f for f, _, _ in spans}), names, readable)
+        for kind, spans in task.golds().items()
+    }
+    if not gold["annotated"].files:  # the primary definition; the others may be empty
+        reason = "no annotated gold file exists at the commit"
+        return [
+            base | {"method": m, "budget": b, "status": "skipped", "error": reason} for m, b in todo
+        ]
+    sizes = {p: len(f.text.split("\n")) for p, f in repo.files.items()}
     rows = []
     for method, budget in todo:
-        started = time.time()
-        shown = None
+        started, usage, room = time.time(), Usage(), max(budget - HEAD_TOKENS, 0)
         try:
-            if method in LINE_RUNNERS:
-                shown, used, tokens_in, tokens_out = LINE_RUNNERS[method](repo, task, gold, budget)
-                ranked = list(shown)
-            else:
-                ranked, tokens_in, tokens_out = RUNNERS[method](repo, task, gold, budget)
-            error = None
-        except Exception as exc:  # A failed call is recorded, reported, and run again next time.
-            ranked, tokens_in, tokens_out, error = [], 0, 0, f"{type(exc).__name__}: {exc}"
-        selected = ranked if shown is not None else fit(ranked, repo, budget)[0]
-        if shown is None:
-            shown = dict.fromkeys(selected)
-            used = repo.cost(selected)
-        lines = packing.score_lines(shown, task.spans, gold.files)
+            delivered, error = RUNNERS[method](repo, task, gold, room, usage), None
+        except Exception as exc:  # recorded, and run again next time
+            delivered, error = {}, f"{type(exc).__name__}: {exc}"
+        tokens = sum(delivery_cost(repo, p, lines) for p, lines in delivered.items())
         rows.append(
-            {
-                "task": task.id,
-                "repo": task.repo,
-                "language": task.language,
-                "source": task.source,
-                "split": task.split,
+            base
+            | {
                 "method": method,
                 "budget": budget,
+                "room": room,
+                "status": "error" if error else "ok",
+                "error": error,
                 "files": len(repo.files),
                 "repo_tokens": repo.tokens(),
-                "gold": len(gold.files),
-                "gold_unresolved": len(gold.unresolved),
-                "gold_filtered": len(gold.filtered),
-                "selected": len(selected),
-                "tokens": used,
-                **score(selected, gold.files, task.spans),
-                "line_recall": lines["line_recall"],
-                "paths": selected,
-                "input_tokens": tokens_in,
-                "output_tokens": tokens_out,
+                "gold": {
+                    kind: {
+                        "files": len(g.files),
+                        "unresolved": len(g.unresolved),
+                        "filtered": len(g.filtered),
+                    }
+                    for kind, g in gold.items()
+                },
+                "selected": len(delivered),
+                "tokens": tokens,
+                "scores": {
+                    kind: score(delivered, g.files, task.golds()[kind], sizes)
+                    for kind, g in gold.items()
+                },
+                "delivered": {
+                    p: None if lines is None else _ranges(lines) for p, lines in delivered.items()
+                },
+                "input_tokens": usage.input,
+                "output_tokens": usage.output,
+                "model_calls": usage.calls,
                 "seconds": round(time.time() - started, 2),
-                "error": error,
-                "model": meta["model"] if method.startswith("llm") else None,
-                "commit": meta["commit"],
             }
         )
-    print(f"[{number}] {task.id} {task.repo} {len(repo.files)} files", flush=True)
     return rows
+
+
+def provenance(methods: list[str]) -> dict:
+    """What a row came from: the exact code, the data revision and the model settings."""
+
+    def git(*args: str) -> str:
+        return subprocess.run(
+            ["git", *args], capture_output=True, text=True, cwd=ROOT
+        ).stdout.strip()
+
+    digest = hashlib.sha256()
+    for name in sorted(git("ls-files", "src", "bench", "pyproject.toml").splitlines()):
+        path = ROOT / name
+        if path.suffix in {".py", ".toml"} and path.exists():
+            digest.update(name.encode() + b"\0" + path.read_bytes())
+    meta = {
+        "commit": git("describe", "--always", "--dirty"),
+        "code": digest.hexdigest()[:12],  # covers uncommitted changes, unlike the commit
+        "dataset": REVISION[:12],
+        "encoding": ENCODING,
+    }
+    if MODEL_METHODS & set(methods):
+        settings = LLMSettings.from_env()
+        meta |= {
+            "model": settings.model,
+            "endpoint": urlparse(settings.base_url).netloc if settings.base_url else "openai",
+            "temperature": settings.temperature,
+        }
+    return meta
 
 
 def main() -> None:
@@ -179,7 +274,7 @@ def main() -> None:
     parser.add_argument("--tasks", type=int, default=20)
     parser.add_argument("--split", choices=["dev", "test"], default="dev")
     parser.add_argument("--unseal", action="store_true", help="Required to run the test split.")
-    parser.add_argument("--methods", default="smallest,bm25,oracle")
+    parser.add_argument("--methods", default="smallest,bm25,oracle:annotated")
     parser.add_argument("--budgets", default="8k,32k,128k")
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--out", default="bench/results/run.jsonl")
@@ -187,7 +282,11 @@ def main() -> None:
     if args.split == "test" and not args.unseal:
         parser.error("The test split is held out. Tune on dev; pass --unseal for the final run.")
     methods = args.methods.split(",")
+    unknown = [m for m in methods if m not in RUNNERS]
+    if unknown:
+        parser.error(f"unknown methods {unknown}; choose from {sorted(RUNNERS)}")
     budgets = [parse_budget(b) for b in args.budgets.split(",")]
+    meta = provenance(methods)
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     # Keep finished rows; drop failed ones and a last line cut short, so they are run again.
@@ -198,28 +297,21 @@ def main() -> None:
                 row = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            if not row["error"]:
+            if row["status"] != "error":
                 rows.append(row)
         out.write_text("".join(json.dumps(row) + "\n" for row in rows))
     done = {(row["task"], row["method"], row["budget"]) for row in rows}
-    # A model selection already made is reused, so a later method that builds on it is cheap.
-    for row in rows:
-        if row["method"] == "llm":
-            _chosen[(row["task"], row["budget"])] = (row["paths"], 0, 0)
-    commit = subprocess.run(
-        ["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True
-    ).stdout.strip()
-    meta = {"commit": commit, "model": os.getenv("LLM_MODEL")}
-
     jobs = []
-    for number, task in enumerate(sample(args.tasks, args.split), 1):
+    for task in sample(args.tasks, args.split):
         todo = [(m, b) for m in methods for b in budgets if (task.id, m, b) not in done]
         if todo:
-            jobs.append((number, task, todo, meta))
+            jobs.append((task, todo, meta))
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
         for finished in pool.map(lambda job: run_task(*job), jobs):
             with out.open("a") as handle:
                 handle.writelines(json.dumps(row) + "\n" for row in finished)
+            if finished:
+                print(f"{finished[0]['task']} {finished[0]['repo']}", flush=True)
 
 
 if __name__ == "__main__":
