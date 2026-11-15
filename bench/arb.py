@@ -114,11 +114,35 @@ class Corpora:
         return loaded
 
 
-def ranking(method: str, repo: Repository, query: str) -> list[str]:
+# The model selector returns a selection within a budget, not a ranking. Its files come first,
+# in its order, then the lexical ranking, so the measures that look past the selection still
+# have a list to read. This budget is the benchmark's headline one.
+SELECT_BUDGET = 8000
+
+
+def ranking(method: str, repo: Repository, query: str) -> tuple[list[str], dict]:
+    """Ranked paths, and the model usage spent on them."""
     if method == "bm25":
-        return [p for p, _ in rank.bm25(repo, query)]
+        return [p for p, _ in rank.bm25(repo, query)], {}
     if method == "bm25-plain":
-        return [p for p, _ in rank.bm25(repo, query, boosts=False)]
+        return [p for p, _ in rank.bm25(repo, query, boosts=False)], {}
+    if method == "llm":
+        from repo2txt.api import repo_select
+        from repo2txt.models import Problem
+
+        from .run import Usage
+
+        usage = Usage()
+        try:
+            result = repo_select(
+                repo, query, SELECT_BUDGET, method="llm", complete=usage.complete()
+            )
+            chosen = [f.path for f in result.files]
+        except Problem:
+            chosen = []
+        rest = [p for p, _ in rank.bm25(repo, query) if p not in chosen]
+        spent = {"input_tokens": usage.input, "output_tokens": usage.output, "calls": usage.calls}
+        return chosen + rest, spent | {"selected": len(chosen)}
     raise ValueError(f"unknown method {method}")
 
 
@@ -131,8 +155,10 @@ def rank_metrics(gold: list[str], ranked: list[str]) -> dict[str, float]:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--data", type=Path, required=True, help="The benchmark's data/ folder.")
-    parser.add_argument("--method", default="bm25", choices=["bm25", "bm25-plain"])
+    parser.add_argument("--method", default="bm25", choices=["bm25", "bm25-plain", "llm"])
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--limit", type=int, help="A fixed sample of this many, for a pilot.")
+    parser.add_argument("--workers", type=int, default=1)
     args = parser.parse_args()
     samples = []
     for subset in SUBSETS:
@@ -141,32 +167,57 @@ def main() -> None:
         if digest != SAMPLES_SHA256[subset]:
             raise SystemExit(f"{path} has sha256 {digest}, not the published one")
         samples += [json.loads(line) for line in path.read_text().splitlines()]
-    corpora = Corpora(args.data)
-    samples.sort(key=lambda s: (s["repo"], s["base_commit"], s["id"]))  # load each commit once
-    details, filtered = [], 0
+    samples = [s for s in samples if gold_files(s)]
+    if args.limit:
+        samples = sorted(samples, key=lambda s: hashlib.sha256(s["id"].encode()).hexdigest())
+        samples = samples[: args.limit]
+    done = set()
+    if args.out.exists():  # resume: keep the samples already ranked
+        done = {json.loads(line)["sample_id"] for line in args.out.read_text().splitlines()}
+    groups: dict[tuple[str, str], list[dict]] = defaultdict(list)
     for sample in samples:
+        if sample["id"] not in done:
+            groups[(sample["repo"], sample["base_commit"])].append(sample)
+
+    def run_group(group: list[dict]) -> list[dict]:
+        corpora = Corpora(args.data)  # one per group: each loads its commit once
+        rows = []
+        for sample in group:
+            repo, every = corpora.load(sample["repo"], sample["base_commit"])
+            rows.append(detail(sample, repo, every))
+        return rows
+
+    def detail(sample: dict, repo: Repository, every: set[str]) -> dict:
         gold = gold_files(sample)
-        if not gold:
-            continue
-        repo, every = corpora.load(sample["repo"], sample["base_commit"])
-        filtered += sum(1 for g in gold if g in every and g not in repo.files)
-        ranked = ranking(args.method, repo, query_text(sample))
-        details.append(
-            {
-                "sample_id": sample["id"],
-                "task_type": sample["task_type"],
-                "repo": sample["repo"],
-                "base_commit": sample["base_commit"],
-                "split": split(sample["id"]),
-                "ranker": f"repo2txt-{args.method}",
-                "candidate_filter": "repo2txt",
-                "gold_files": gold,
-                "top_files": ranked[:20],
-                "ranked_files": ranked,
-                "metrics": rank_metrics(gold, ranked),
-            }
-        )
-    args.out.write_text("".join(json.dumps(d) + "\n" for d in details))
+        ranked, spent = ranking(args.method, repo, query_text(sample))
+        return {
+            "sample_id": sample["id"],
+            "task_type": sample["task_type"],
+            "repo": sample["repo"],
+            "base_commit": sample["base_commit"],
+            "split": split(sample["id"]),
+            "ranker": f"repo2txt-{args.method}",
+            "candidate_filter": "repo2txt",
+            "gold_files": gold,
+            "top_files": ranked[:20],
+            "ranked_files": ranked,
+            "metrics": rank_metrics(gold, ranked),
+            "filtered_gold": sum(1 for g in gold if g in every and g not in repo.files),
+            "usage": spent,
+        }
+
+    from concurrent.futures import ThreadPoolExecutor
+
+    with ThreadPoolExecutor(args.workers) as pool, args.out.open("a") as handle:
+        for rows in pool.map(run_group, groups.values()):
+            handle.writelines(json.dumps(r) + "\n" for r in rows)
+            handle.flush()
+    details = [json.loads(line) for line in args.out.read_text().splitlines()]
+    filtered = sum(d.get("filtered_gold", 0) for d in details)
+    spent_in = sum(d.get("usage", {}).get("input_tokens", 0) for d in details)
+    spent_out = sum(d.get("usage", {}).get("output_tokens", 0) for d in details)
+    if spent_in:
+        print(f"model usage: {spent_in:,} input and {spent_out:,} output tokens")
     by_task = defaultdict(list)
     for d in details:
         by_task[d["task_type"]].append(d["metrics"])
