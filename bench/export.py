@@ -82,8 +82,8 @@ def changes() -> list[dict]:
         ("lexical", "Three ranking signals", "plain BM25", free, "bm25", "bm25-plain", True),
         ("lexical", "Score cut-off", "the three signals", free, "bm25-cut", "bm25", False),
         ("model", "Shortlist, first prompt", "first selector", tuned, "llm-v1", "llm", False),
-        ("model", "Shortlist and recall prompt", "first selector", tuned, "llm-v2", "llm", True),
-        ("model", "Shortlist, recall prompt", "the prompt alone", tuned, "llm-v2", "llm-v2n", True),
+        ("model", "Recall prompt with shortlist", "first selector", tuned, "llm-v2", "llm", True),
+        ("model", "Adding the shortlist", "recall prompt alone", tuned, "llm-v2", "llm-v2n", True),
         (
             "model",
             "Search and outline tools, as built",

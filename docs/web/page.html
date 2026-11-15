@@ -65,6 +65,10 @@ code, .mono { font-family: var(--mono); font-size: 0.84em; }
 .small { font-size: 15px; color: var(--muted); }
 
 /* Findings */
+.toc { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 14px; font: 400 13.5px/1.5 var(--display); }
+.toc a { color: var(--muted); text-decoration: none; }
+.toc a:hover { color: var(--ink); text-decoration: underline; }
+blockquote.callout { font-style: italic; }
 .findings { list-style: none; padding: 0; margin: 28px 0 8px; display: grid; gap: 18px; }
 .findings li { display: grid; grid-template-columns: 8px 1fr; gap: 16px; }
 .findings li::before { content: ""; width: 8px; height: 8px; border-radius: 2px; background: var(--ink); margin-top: 11px; }
@@ -163,36 +167,39 @@ footer { margin-top: 72px; padding-top: 18px; border-top: 1px solid var(--rule);
 <header class="col">
   <div class="kicker">Repo2Txt · lab notes · November 2026</div>
   <h1>What reaches the model</h1>
-  <p class="dek">A coding agent works only from what fits in its context. On <span data-bind="tasks"></span> real issues, from <span data-bind="repos"></span> repositories the methods never saw, this measures how much of the code each fix needed actually reaches the model, at 8,000, 32,000 and 128,000 tokens, and what changes that.</p>
+  <p class="dek">A coding agent works only from what fits in its context. Repo2Txt chooses which parts of a repository go in. Given 32,000 tokens, its default, a lexical ranker, delivers <span data-bind="curve.bm25.32000.recall" data-fmt="pct"></span> of the files a fix needs. A small model, told why completeness matters, delivers <span data-bind="curve.llm.32000.recall" data-fmt="pct"></span>. Measured on <span data-bind="tasks"></span> real issues from <span data-bind="repos"></span> repositories the methods never saw.</p>
   <div class="byline"><span>Nason</span><span>14–15 November 2026</span><span><a href="https://github.com/NasonZ/Repo2Txt">Code and data</a></span><span><a href="https://github.com/NasonZ/Repo2Txt/blob/main/docs/report-2026-11-14.md">Full report</a></span></div>
+  <nav class="toc" aria-label="Contents"><a href="#measured">What is measured</a><a href="#lexical">Lexical ranking</a><a href="#model">The model selector</a><a href="#tools">The tool that looked useless</a><a href="#lines-not-files">Lines, not files</a><a href="#every">Every issue</a><a href="#overturn">What could overturn this</a><a href="#conclusion">Conclusion</a></nav>
 </header>
 
 <figure class="wide" id="hero">
   <div class="sheet">
     <div class="fig-head">
-      <p class="fig-title">One issue, three ways of filling the context window</p>
+      <p class="fig-title" id="hero-title">One issue, three ways of filling the context window</p>
       <div class="seg" role="group" aria-label="Token budget" data-budget-group="hero"></div>
     </div>
     <div class="task-line" id="hero-task"></div>
     <div id="hero-strips"></div>
     <div class="legend" id="hero-legend"></div>
+    <div class="small mono" id="hero-block" aria-live="polite" style="margin-top:6px;min-height:1.4em"></div>
   </div>
-  <figcaption class="col"><span class="t">Each bar is the budget; each block is a file, as wide as its tokens.</span> Solid blocks are files the fix needed; pale blocks are files that were not needed. The lexical ranker fills the window with whatever shares the issue's words; the model chooses a shorter list. The bottom bar is the ceiling: the needed files and nothing else.</figcaption>
+  <figcaption class="col"><span class="t">Each bar is the token budget; each block is a file, as wide as its tokens.</span> Solid blocks are files the fix needed, pale blocks files it did not. Compare how much of each bar is solid. The bottom bar, the ceiling, holds the needed files and nothing else. This issue was chosen because the methods differ on it; the averages follow, and every issue is listed at the end. Hover or tap a block to see the file; switch the budget to see the same issue at 8,000 and 128,000 tokens.</figcaption>
 </figure>
 
 <section class="col">
+  <h2 style="margin-top:40px">Findings</h2>
   <ul class="findings" id="findings">
-    <li><span><b>Most of the needed code does not arrive.</b> At 32,000 tokens the default lexical ranker delivers <span class="num" data-bind="curve.bm25.32000.recall"></span> of the files a fix needed, and only <span class="num" data-bind="curve.bm25.32000.precision" data-fmt="pct"></span> of the files it delivers were needed.</span></li>
-    <li><span><b>A small model chooses better, once told why.</b> Claude Haiku 5.5, shown the directory tree and the ranker's leads, delivers <span class="num" data-bind="curve.llm.32000.recall"></span> at 32,000 tokens and <span class="num" data-bind="curve.llm.128000.recall"></span> at 128,000.</span></li>
-    <li><span><b>At small budgets, files are the wrong unit.</b> The lines a fix needed total about 2,000 tokens. Letting the model pick line ranges at 8,000 tokens raises the share of needed lines delivered from <span class="num" data-bind="curve.llm.8000.line"></span> to <span class="num" data-bind="curve.llm-lines.8000.line"></span>.</span></li>
-    <li><span><b>Most ideas did not survive measurement.</b> Search tools, merged runs, padding from the ranker and a score cut-off were each tried and removed. One looked like a failure of the idea and was a bug in the harness.</span></li>
+    <li><span><b>The default ranker fills the budget with the wrong files.</b> At 32,000 tokens the lexical ranker delivers <span class="num" data-bind="curve.bm25.32000.recall"></span> of the files a fix needed, and only <span class="num" data-bind="curve.bm25.32000.precision" data-fmt="pct"></span> of the files it delivers were needed.</span></li>
+    <li><span><b>A small model does better once it is told why completeness matters.</b> Claude Haiku 5.5, Anthropic's smallest current model, shown the directory tree and the ranker's top 30 files, delivers <span class="num" data-bind="curve.llm.32000.recall"></span> at 32,000 tokens and <span class="num" data-bind="curve.llm.128000.recall"></span> at 128,000.</span></li>
+    <li><span><b>At 8,000 tokens, whole files waste the budget.</b> The lines a fix needed total about 2,000 tokens. Letting the model pick line ranges at 8,000 tokens raises the share of needed lines delivered from <span class="num" data-bind="curve.llm.8000.line"></span> to <span class="num" data-bind="curve.llm-lines.8000.line"></span>, more than even a perfect choice of whole files reaches (<span class="num" data-bind="curve.oracle.8000.line"></span>).</span></li>
+    <li><span><b>Nothing else tried raised recall by more than a point.</b> Padding with ranked files added about one point, too little for the tokens it cost; merging several runs added nothing; a score cut-off and the first search tools lowered it. All were removed. The search tools first looked harmful; reading the transcripts showed a bug in how they were wired up.</span></li>
   </ul>
 </section>
 
 <section class="col">
-  <h2>What is measured</h2>
-  <p>Each issue comes from <a href="https://arxiv.org/abs/2602.05892">ContextBench</a>, with the lines of code annotators judged necessary to resolve it. A method is given the issue's text and the repository at that commit, and returns files in order. They are kept, in that order, while they fit the budget. The fix itself is never shown.</p>
-  <p><b>Recall</b> is the share of the needed files that were kept. If an issue needs four files and a method's selection holds three of them within 32,000 tokens, its recall at 32k is 0.75. Recall alone is easy to game: return everything, and a large enough budget scores 1.0. So <b>precision</b> sits beside it, the share of kept files that were needed. The <b>ceiling</b> is the needed files themselves: below 1.0 whenever they do not fit.</p>
+  <h2 id="measured">What is measured</h2>
+  <p>Each issue comes from <a href="https://arxiv.org/abs/2602.05892">ContextBench</a>, a 2026 benchmark of real GitHub issues in eight languages, with the lines of code annotators judged necessary to resolve it. A method is given the issue's text and the repository at that commit, and returns files in order. They are kept, in that order, while they fit the budget. The fix itself is never shown.</p>
+  <p><b>Recall</b> is the share of the needed files that were kept. If an issue needs four files and a method's selection holds three of them within 32,000 tokens, its recall at 32k is 0.75. Recall alone is easy to game: return everything, and a large enough budget scores 1.0. So <b>precision</b> sits beside it, the share of kept files that were needed. The <b>ceiling</b> is the needed files themselves: below 1.0 whenever they do not fit. <b>Line recall</b>, used where line ranges come in, is the share of the needed lines delivered; a whole file delivers all of its lines. Both are averaged per issue, and an issue where nothing is delivered scores 0.</p>
   <p>Methods were tuned on 281 issues from 40 repositories. Everything on this page, unless marked otherwise, is from <span data-bind="tasks"></span> further issues from <span data-bind="repos"></span> other repositories, held out until the methods were fixed and run once.</p>
 </section>
 
@@ -204,30 +211,32 @@ footer { margin-top: 72px; padding-top: 18px; border-top: 1px solid var(--rule);
     </div>
     <div id="curve"></div>
   </div>
-  <figcaption class="col"><span class="t">Held-out issues, with 95% intervals from resampling whole repositories.</span> Switch the measure to see the two routes to the same recall at 128,000 tokens: the model delivers a short, accurate list, the ranker a long and mostly unneeded one.</figcaption>
+  <figcaption class="col" id="curve-caption"></figcaption>
 </figure>
 
 <section class="col">
-  <h2>Lexical ranking: three things a word count misses</h2>
+  <h2 id="lexical">Lexical ranking: three things a word count misses</h2>
   <p>BM25 scores a file by the words it shares with the issue. But issues are not search queries. They name files outright, quote identifiers in backticks, and describe behaviour that tests and documentation also describe. Three signals were added: a file the issue names comes first; a file that defines a named identifier is lifted above files that merely use it; and tests, examples and prose rank below code.</p>
   <p>On the held-out issues they take recall at 32,000 tokens from <span class="num" data-bind="curve.bm25-plain.32000.recall"></span> to <span class="num" data-bind="curve.bm25.32000.recall"></span>, for no cost at run time. This is the default for <code>repo2txt select</code>. Its weakness is precision: it fills whatever budget it is given.</p>
 
-  <h2>Why the model first stopped at three files</h2>
+  <h2 id="model">Why the model first stopped at three files</h2>
   <p>The first model selector showed Claude Haiku 5.5 the directory tree with token counts and let it choose. It named a median of three files, used 14,000 of 32,000 tokens, and stopped. Of the 233 needed files it missed on the tuning issues, a third were in the lexical ranker's top 30, which the model never saw. Seeing a file in the tree barely helped: it found 43% of the needed files shown to it and 39% of those hidden in collapsed directories.</p>
-  <p>Two changes fixed most of this. The model was shown the ranker's top 30 beside the request, and the prompt was rewritten to say why completeness matters: whoever reads the selection works from those files alone, so a file they need and were not given stops them, while a file they did not need costs only its tokens.</p>
+  <p>Two changes fixed most of this. The model was shown the ranker's top 30 beside the request, and the prompt was rewritten to give it the reason for completeness. Its key sentence:</p>
+  <blockquote class="callout">Whoever reads your selection works from those files alone. A file they need and were not given stops them; a file they did not need costs only its tokens. So lean towards including.</blockquote>
+  <p>With both, the median selection doubled to six files.</p>
 </section>
 
 <figure class="wide">
   <div class="sheet">
-    <div class="fig-head"><p class="fig-title">What each change did to recall at 32,000 tokens</p></div>
+    <div class="fig-head"><p class="fig-title">Two ideas carried the gains: the ranking signals, and the recall prompt with its shortlist</p></div>
     <div id="changes"></div>
   </div>
-  <figcaption class="col"><span class="t">Tuning issues, paired on the same tasks, with 95% intervals.</span> Filled dots are in the shipped version. The shortlist did nothing until the prompt asked for completeness, and then it was worth four points.</figcaption>
+  <figcaption class="col"><span class="t">Recall at 32,000 tokens on the tuning issues, each change compared with what it changed, on the same issues; lines are 95% intervals.</span> Model changes were measured on 100 of the 281 tuning issues, for cost. Filled dots are in the shipped version: orange for the lexical ranker, blue for the model. Note the shortlist: with the first prompt it lowered recall slightly, and added to the rewritten prompt it was worth four points.</figcaption>
 </figure>
 
 <section class="col">
-  <h2>The tool that looked useless</h2>
-  <p>Every trained code-search agent published this year searches and reads. So two tools were added: a pattern search over file contents, and an outline of what a file defines. Recall fell by six points. Before recording that, ten of the transcripts where it fell were read.</p>
+  <h2 id="tools">The tool that looked useless</h2>
+  <p>Recent trained code-search agents, such as Cognition's SWE-grep and Chroma's Context-1, work by searching and reading. So two tools were added: a pattern search over file contents, and an outline of what a file defines. On the tuning issues, recall fell by six points. Before recording that, ten of the transcripts where it fell were read.</p>
 </section>
 
 <figure class="wide" id="steps-figure">
@@ -240,29 +249,29 @@ footer { margin-top: 72px; padding-top: 18px; border-top: 1px solid var(--rule);
     <div class="transcript" id="steps-body" aria-live="polite"></div>
     <div class="verdict" id="steps-verdict"></div>
   </div>
-  <figcaption class="col"><span class="t">Two complete runs, round by round.</span> Tool results are shortened. The failing run is the original tools version, rerun from its commit on a tuning issue from jackson-databind.</figcaption>
+  <figcaption class="col"><span class="t">Two complete runs, round by round.</span> Tool results are shortened. The failing run is the original tools version, rerun from its commit on a tuning issue from jackson-databind. The kept selector is shown on a different issue, from langchain: it has no search, but can list collapsed directories and must select within five rounds.</figcaption>
 </figure>
 
 <section class="col">
-  <p>Every “no match” in the failing run was reported without the file being read: the search tool treated a file path as a directory and looked inside it for files. The files did contain the terms, and three of them were the files the fix needed. The model kept searching until its rounds ran out, then wrote that it had selected six files. It had selected none.</p>
-  <p>With the search fixed and a round kept for selecting, the tools recovered and then tied the kept selector at one and a half times the cost, probably because the shortlist already does a search's work before the model starts. They were removed. Had the transcripts not been read, this would have been recorded as “tools do not help”.</p>
+  <p>Every “no match” in the failing run was reported without the file being read: the search tool treated a file path as a directory and looked inside it for files. The files did contain the terms, and both files it reported this way were files the fix needed. The fault first shows in round 2. The model kept searching until its rounds ran out, then wrote that it had selected six files. It had selected none.</p>
+  <p>With the search fixed and a round kept for selecting, the tools recovered five points and then tied the kept selector (−0.01, −0.05 to +0.02) at one and a half times the cost, probably because the shortlist already does a search's work before the model starts. They were removed. Had the transcripts not been read, this would have been recorded as “tools do not help”.</p>
 
-  <h2>Lines, not files</h2>
+  <h2 id="lines-not-files">Lines, not files</h2>
   <p>At 8,000 tokens even a perfect choice of files reaches only part of what is needed, because the needed files often do not fit whole. But the needed lines themselves total about 2,000 tokens. Choosing lines instead of files could almost close that gap, if the right lines can be found.</p>
   <p>Finding them by the issue's words failed: the lines a fix needs often do not contain those words, and focused views dropped them. What worked was asking the model again. It first chooses files at four times the budget, then sees outlines of those files, every block with its line range and size, and picks the ranges to read. The rest of the budget goes to its chosen files whole.</p>
 </section>
 
 <figure class="wide">
   <div class="sheet">
-    <div class="fig-head"><p class="fig-title">Share of the needed lines delivered at 8,000 tokens</p></div>
+    <div class="fig-head"><p class="fig-title" id="lines-title">Share of the needed lines delivered at 8,000 tokens</p></div>
     <div id="lines"></div>
   </div>
-  <figcaption class="col"><span class="t">Held-out issues.</span> <code>select --method llm --lines</code> prints line ranges that <code>pack --stdin</code> reads.</figcaption>
+  <figcaption class="col" id="lines-caption"></figcaption>
 </figure>
 
 <section class="col">
-  <h2>Every issue</h2>
-  <p>The averages above come from these. Each row shows an issue, what the fix needed, and what each method delivered. The dots read, left to right: lexical ranking, then the model; at 8,000 tokens a third dot shows the model's line ranges. A filled dot means every needed file arrived, a half-filled one that some did.</p>
+  <h2 id="every">Every issue</h2>
+  <p>The averages above come from these. Each row shows an issue, what the fix needed, and what each method delivered. The dots read, left to right: lexical ranking, then the model; at 8,000 tokens a third dot shows the model's line ranges. A filled dot means every needed file arrived, a half-filled one that some did; the fraction beside it counts them.</p>
 </section>
 
 <figure class="wide">
@@ -271,17 +280,25 @@ footer { margin-top: 72px; padding-top: 18px; border-top: 1px solid var(--rule);
       <input type="search" id="task-filter" placeholder="Filter by repository, language or words in the issue" aria-label="Filter issues">
       <div class="seg" role="group" aria-label="Token budget" data-budget-group="browser"></div>
     </div>
+    <div class="legend" style="margin:0 0 6px"><span><span class="dot full" style="--c:var(--lex)"></span>lexical ranker (default)</span><span><span class="dot full" style="--c:var(--model)"></span>model selector</span><span><span class="dot full" style="--c:var(--first)"></span>model selector, line ranges (8k)</span><span>filled: every needed file arrived · half: some · empty: none</span></div>
     <div class="small" id="task-count" style="margin-bottom:8px"></div>
     <div class="task-list" id="task-list"></div>
   </div>
 </figure>
 
 <section class="col">
-  <h2>What could overturn this</h2>
-  <p><b>Python.</b> Half the tuning issues were Python, and the ranker's signals recognise a fixed list of declaration keywords. The held-out set is more mixed, and the gap between Python and the rest is the first place to look for a signal fitted to its training data.</p>
+  <h2 id="overturn">What could overturn this</h2>
+  <p><b>Language.</b> Half the tuning issues were Python, which raised the worry that the ranker's signals were fitted to it. On the held-out issues Python was harder than the other languages at 8,000 tokens for both methods (lexical ranker 0.19 against 0.33; model selector 0.33 against 0.64), so the gap is not the ranker's tuning. Python is also over half the held-out issues, so the averages lean on it. What causes it is not established here.</p>
   <p><b>One run, one model.</b> Each configuration was run once with one small model. How much its choices vary from run to run, and whether a stronger model chooses better, were not measured.</p>
   <p><b>Memory of the fix.</b> Whether the model had seen these repositories and their fixes in training was not measured. The lexical rows are unaffected; the model rows could be.</p>
-  <p><b>What “needed” means.</b> The needed files are sufficient, not minimal, so precision is understated. And the earliest twenty-issue pilot, run before the split existed, included issues from four repositories that were later held out; no tuning decision was made on it.</p>
+  <p><b>What “needed” means.</b> The needed files are one sufficient set chosen by annotators; other files could serve as well, so a choice scored as imprecise may not be, and precision is probably understated. And the earliest twenty-issue pilot, run before the split existed, included four issues that later fell in the held-out set; no tuning decision was made on the pilot.</p>
+
+  <h2 id="conclusion">Conclusion</h2>
+  <p id="conclusion-text"></p>
+  <p>Two things transfer beyond this tool. A model asked to choose context should be told what a miss costs, because left to itself it stops at the obvious files. And an agent's harness should be judged from transcripts as well as scores: the search tools' failure was a wiring bug, and the average alone would have buried it.</p>
+
+  <h3>Methods in brief</h3>
+  <p class="small">Model: Claude Haiku 5.5 through Anthropic's OpenAI-compatible endpoint, default sampling, one run per configuration. Budgets are counted in <code>o200k_base</code> tokens; Claude's own tokeniser counts somewhat differently. The line-range method makes one more model call per selection. Intervals: 95%, 2,000 bootstrap resamples of whole repositories. Tuning: 281 issues from 40 repositories; held out: <span data-bind="tasks"></span> issues from <span data-bind="repos"></span> others, run once after every choice was fixed. The full report, with every variant tried and its result, is in the repository.</p>
 
   <h2>Reproduce it</h2>
   <div class="repro">uv sync --all-extras
@@ -313,12 +330,12 @@ python -m bench.report test.jsonl</div>
 
   // Numbers in the prose come from the data, so they cannot drift from the charts.
   const usage = (D.cost_tokens || {});
-  D.cost = usage.input ? "$" + (usage.input / 1e6 + 5 * usage.output / 1e6).toFixed(0) + " of model calls at assumed prices" : "–";
+  D.cost = usage.input ? "$" + (usage.input / 1e6 + 5 * usage.output / 1e6).toFixed(0) + " of model calls at an assumed $1 per million input and $5 per million output tokens" : "–";
   document.querySelectorAll("[data-bind]").forEach(n => {
     const v = get(n.dataset.bind);
     if (v == null) n.textContent = "–";
-    else if (n.dataset.fmt === "pct") n.textContent = Math.round(100 * v) + "%";
-    else n.textContent = typeof v === "number" && v < 2 ? fmt(v) : v.toLocaleString("en-GB");
+    else if (n.dataset.fmt === "pct") n.textContent = Math.round(100 * Number(fmt(v))) + "%";
+    else n.textContent = typeof v === "number" && v < 2 ? Math.round(100 * Number(fmt(v))) + "%" : v.toLocaleString("en-GB");
   });
 
   function segmented(container, options, initial, onPick) {
@@ -336,9 +353,9 @@ python -m bench.report test.jsonl</div>
   }
 
   const METHOD = {
-    bm25: { name: "Lexical default", note: "repo2txt select", c: "--lex" },
+    bm25: { name: "Lexical ranker", note: "repo2txt select", c: "--lex" },
     llm: { name: "Model selector", note: "select --method llm", c: "--model" },
-    "llm-lines": { name: "Model, line ranges", note: "select --method llm --lines", c: "--model" },
+    "llm-lines": { name: "Model selector, line ranges", note: "select --method llm --lines", c: "--first" },
     "bm25-plain": { name: "Plain BM25", note: "reference", c: "--ceil" },
     oracle: { name: "Ceiling", note: "the needed files", c: "--ceil" },
     "oracle-lines": { name: "Ceiling", note: "the needed lines", c: "--ceil" },
@@ -347,13 +364,14 @@ python -m bench.report test.jsonl</div>
 
   /* ---------- Hero: context-window strips ---------- */
   const heroTask = D.examples.find(e => Object.values(e.picks).some(p => p.all));
+  function showBlock(text) { const n = document.getElementById("hero-block"); if (n) n.textContent = text; }
   function drawHero(budget) {
     const box = document.getElementById("hero-strips");
     box.innerHTML = "";
     if (!heroTask) return;
     const needed = new Set(heroTask.needed.map(n => n.path));
     document.getElementById("hero-task").innerHTML =
-      `<b>${heroTask.repo}</b> · ${escapeHtml(heroTask.title)} · ${heroTask.files.toLocaleString("en-GB")} files, ${heroTask.tokens.toLocaleString("en-GB")} tokens · the fix needed ${heroTask.needed.length} files`;
+      `<b>${heroTask.repo}</b> · “${escapeHtml(heroTask.title)}” · a repository of ${heroTask.files.toLocaleString("en-GB")} files`;
     const rows = [["bm25", heroTask.picks["bm25@" + budget]], ["llm", heroTask.picks["llm@" + budget]]];
     rows.forEach(([m, pick]) => {
       if (!pick || !pick.all) return;
@@ -368,6 +386,9 @@ python -m bench.report test.jsonl</div>
         i.className = needed.has(p) ? "hit" : "miss";
         i.style.width = (100 * t / budget) + "%";
         i.title = `${p} · ${t.toLocaleString("en-GB")} tokens${needed.has(p) ? " · needed" : ""}`;
+        i.tabIndex = 0;
+        i.addEventListener("click", () => showBlock(i.title));
+        i.addEventListener("focus", () => showBlock(i.title));
         strip.appendChild(i);
       });
       row.appendChild(strip);
@@ -387,6 +408,9 @@ python -m bench.report test.jsonl</div>
       const i = document.createElement("i"); i.className = "hit";
       i.style.width = (100 * n.tokens / budget) + "%";
       i.title = `${n.path} · ${n.tokens.toLocaleString("en-GB")} tokens`;
+      i.tabIndex = 0;
+      i.addEventListener("click", () => showBlock(i.title));
+      i.addEventListener("focus", () => showBlock(i.title));
       strip.appendChild(i);
     });
     row.appendChild(strip);
@@ -395,7 +419,10 @@ python -m bench.report test.jsonl</div>
     row.appendChild(note);
     box.appendChild(row);
     document.getElementById("hero-legend").innerHTML =
-      `<span><i class="sw" style="background:var(--model)"></i>needed, delivered</span><span><i class="sw" style="background:color-mix(in srgb, var(--model) 22%, var(--sheet))"></i>delivered, not needed</span><span>Hover a block for the file</span>`;
+      `<span><i class="sw" style="background:var(--lex)"></i><i class="sw" style="background:var(--model)"></i><i class="sw" style="background:var(--ceil)"></i>needed by the fix</span><span><i class="sw" style="background:color-mix(in srgb, var(--lex) 22%, var(--sheet))"></i><i class="sw" style="background:color-mix(in srgb, var(--model) 22%, var(--sheet))"></i>delivered, not needed</span>`;
+    const lex = heroTask.picks["bm25@" + budget], mod = heroTask.picks["llm@" + budget];
+    if (lex && mod) document.getElementById("hero-title").textContent =
+      `At ${k(budget)} tokens, the lexical ranker delivers ${lex.hits.length} of the ${needed.size} files this fix needed; the model, ${mod.hits.length}`;
   }
   document.querySelectorAll('[data-budget-group="hero"]').forEach(g =>
     segmented(g, BUDGETS.map(b => [b, k(b) + " tokens"]), 32000, b => drawHero(+b)));
@@ -405,22 +432,31 @@ python -m bench.report test.jsonl</div>
   const MEASURES = [["recall", "Recall"], ["precision", "Precision"], ["tokens", "Tokens used"]];
   function drawCurve(measure) {
     const box = document.getElementById("curve"); box.innerHTML = "";
-    const titles = { recall: "Share of the needed files that reach the model", precision: "Share of what was delivered that was needed", tokens: "Tokens delivered, of the budget" };
+    const c = D.curve;
+    const titles = {
+      recall: `The model selector delivers more of the needed files than the lexical ranker at every budget: ${fmt(c.llm[32000].recall)} against ${fmt(c.bm25[32000].recall)} at 32k`,
+      precision: `Of what the lexical ranker delivers, ${Math.round(100 * c.bm25[32000].precision)}% was needed at 32k; of the model's choice, ${Math.round(100 * c.llm[32000].precision)}%`,
+      tokens: `The default fills every budget; the model uses ${Math.round(c.llm[128000].tokens / 1000)}k of 128k`,
+    };
     document.getElementById("curve-title").textContent = titles[measure];
     const series = ["oracle", "llm", "bm25", "bm25-plain"].filter(m => D.curve[m]);
-    const W = 940, H = 380, L = 64, R = 210, T = 16, B = 44;
+    const W = Math.max(330, Math.round(box.clientWidth)), narrow = W < 640;
+    const H = narrow ? 330 : 396, L = narrow ? 34 : 64, R = narrow ? 118 : 210, T = 32, B = 44;
     const pw = W - L - R, ph = H - T - B;
     const maxV = measure === "tokens" ? 128000 : 1;
     const x = i => L + pw * i / (BUDGETS.length - 1);
     const y = v => T + ph * (1 - v / maxV);
     const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, width: "100%", role: "img", "aria-label": titles[measure] });
+    const yname = { recall: "Recall: needed files delivered", precision: "Precision: delivered files that were needed", tokens: "Tokens delivered" }[measure];
+    svg.appendChild(el("text", { x: 0, y: 10, "font-size": 12, fill: css("--muted") }, yname));
     const ticks = measure === "tokens" ? [0, 32000, 64000, 96000, 128000] : [0, 0.25, 0.5, 0.75, 1];
     ticks.forEach(v => {
       svg.appendChild(el("line", { x1: L, x2: L + pw, y1: y(v), y2: y(v), stroke: css("--rule") }));
       svg.appendChild(el("text", { x: L - 10, y: y(v) + 4, "text-anchor": "end", "font-size": 12, fill: css("--muted") },
         measure === "tokens" ? (v ? k(v) : "0") : String(v)));
     });
-    BUDGETS.forEach((b, i) => svg.appendChild(el("text", { x: x(i), y: H - 14, "text-anchor": "middle", "font-size": 12.5, fill: css("--muted") }, k(b) + " tokens")));
+    BUDGETS.forEach((b, i) => svg.appendChild(el("text", { x: x(i), y: H - 14, "text-anchor": "middle", "font-size": 12.5, fill: css("--muted") }, narrow ? k(b) : k(b) + " tokens")));
+    svg.appendChild(el("text", { x: L + pw / 2, y: H - 0.5, "text-anchor": "middle", "font-size": 11, fill: css("--muted") }, "each budget is four times the last"));
     const labels = [];
     series.forEach(m => {
       const c = css(METHOD[m].c);
@@ -429,7 +465,7 @@ python -m bench.report test.jsonl</div>
         const band = pts.map(([px, , d]) => `${px},${y(d.hi)}`).concat(pts.slice().reverse().map(([px, , d]) => `${px},${y(d.lo)}`));
         svg.appendChild(el("polygon", { points: band.join(" "), fill: c, "fill-opacity": 0.1 }));
       }
-      svg.appendChild(el("polyline", { points: pts.map(([a, b]) => `${a},${b}`).join(" "), fill: "none", stroke: c, "stroke-width": m === "llm" ? 2.5 : 2, "stroke-dasharray": m === "oracle" ? "6 5" : (m === "bm25-plain" ? "2 4" : "none") }));
+      svg.appendChild(el("polyline", { points: pts.map(([a, b]) => `${a},${b}`).join(" "), fill: "none", stroke: c, "stroke-width": m === "llm" ? 2.5 : (m === "bm25-plain" ? 1.25 : 2), "stroke-opacity": m === "bm25-plain" ? 0.7 : 1, "stroke-dasharray": m === "oracle" ? "7 5" : "none" }));
       pts.forEach(([px, py, d], i) => {
         const dot = el("circle", { cx: px, cy: py, r: 5, fill: c, stroke: css("--sheet"), "stroke-width": 2 });
         const tip = el("title", {}, `${METHOD[m].name} at ${k(BUDGETS[i])}: recall ${fmt(d.recall)} (${fmt(d.lo)}–${fmt(d.hi)}), precision ${fmt(d.precision)}, ${d.tokens.toLocaleString("en-GB")} tokens, ${d.files} files`);
@@ -442,7 +478,7 @@ python -m bench.report test.jsonl</div>
     for (let i = 1; i < labels.length; i++) labels[i][0] = Math.max(labels[i][0], labels[i - 1][0] + 34);
     labels.forEach(([ly, m, v, c]) => {
       svg.appendChild(el("rect", { x: x(2) + 14, y: ly - 7, width: 10, height: 3, rx: 1.5, fill: c }));
-      svg.appendChild(el("text", { x: x(2) + 30, y: ly - 1, "font-size": 13, "font-weight": 600, fill: css("--ink") }, METHOD[m].name));
+      svg.appendChild(el("text", { x: x(2) + 30, y: ly - 1, "font-size": narrow ? 11.5 : 13, "font-weight": 600, fill: css("--ink") }, narrow ? METHOD[m].name.replace("Model selector", "Model").replace("Lexical ranker", "Lexical") : METHOD[m].name));
       svg.appendChild(el("text", { x: x(2) + 30, y: ly + 15, "font-size": 12, fill: css("--muted") },
         measure === "tokens" ? Math.round(v).toLocaleString("en-GB") + " at 128k" : fmt(v) + " at 128k"));
     });
@@ -452,12 +488,13 @@ python -m bench.report test.jsonl</div>
   drawCurve("recall");
 
   /* ---------- What each change did ---------- */
-  (function drawChanges() {
-    const box = document.getElementById("changes");
+  function drawChanges() {
+    const box = document.getElementById("changes"); box.innerHTML = "";
     const rows = D.changes;
-    const W = 940, rowH = 44, L = 330, R = 70, lo = -0.15, hi = 0.25;
+    const W = Math.max(330, Math.round(box.clientWidth)), narrow = W < 640;
+    const rowH = narrow ? 62 : 44, L = narrow ? 8 : 330, R = narrow ? 50 : 70, lo = -0.15, hi = 0.25;
     const groups = [["lexical", "Lexical ranking, 281 issues"], ["model", "Model selector, 100 issues"]];
-    const H = 30 + rows.length * rowH + groups.length * 30 + 30;
+    const H = 30 + rows.length * rowH + groups.length * 30 + 50;
     const x = v => L + (W - L - R) * (v - lo) / (hi - lo);
     const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, width: "100%", role: "img", "aria-label": "Change in recall for each change tried" });
     let yy = 10; const top = yy;
@@ -465,10 +502,15 @@ python -m bench.report test.jsonl</div>
     groups.forEach(([g, name]) => {
       yy += 24; marks.push(el("text", { x: 0, y: yy, "font-size": 13.5, "font-weight": 600, fill: css("--ink") }, name)); yy += 8;
       rows.filter(r => r.group === g).forEach(r => {
-        yy += rowH; const cy = yy - rowH / 2;
-        marks.push(el("text", { x: 0, y: cy - 1, "font-size": 13.5, fill: css("--ink") }, r.label));
-        marks.push(el("text", { x: 0, y: cy + 15, "font-size": 12, fill: css("--muted") }, "vs " + r.versus));
-        const c = r.kept ? css("--model") : css("--muted");
+        yy += rowH; const cy = narrow ? yy - 14 : yy - rowH / 2;
+        if (narrow) {
+          marks.push(el("text", { x: 0, y: cy - 22, "font-size": 13, stroke: css("--sheet"), "stroke-width": 4, "paint-order": "stroke", fill: css("--ink") }, r.label));
+          marks.push(el("text", { x: W, y: cy - 22, "text-anchor": "end", "font-size": 11.5, stroke: css("--sheet"), "stroke-width": 4, "paint-order": "stroke", fill: css("--muted") }, "vs " + r.versus));
+        } else {
+          marks.push(el("text", { x: 0, y: cy - 1, "font-size": 13.5, fill: css("--ink") }, r.label));
+          marks.push(el("text", { x: 0, y: cy + 15, "font-size": 12, fill: css("--muted") }, "vs " + r.versus));
+        }
+        const c = r.kept ? css(g === "lexical" ? "--lex" : "--model") : css("--muted");
         marks.push(el("line", { x1: x(r.lo), x2: x(r.hi), y1: cy, y2: cy, stroke: c, "stroke-width": 2, "stroke-linecap": "round" }));
         const dot = el("circle", { cx: x(r.d), cy, r: 6, fill: r.kept ? c : css("--sheet"), stroke: r.kept ? css("--sheet") : c, "stroke-width": 2 });
         dot.appendChild(el("title", {}, `${r.label}: ${r.d >= 0 ? "+" : ""}${fmt(r.d)} (${fmt(r.lo)} to ${fmt(r.hi)}), ${r.tasks} issues`));
@@ -480,15 +522,21 @@ python -m bench.report test.jsonl</div>
       svg.appendChild(el("line", { x1: x(v), x2: x(v), y1: top, y2: yy + 6, stroke: v === 0 ? css("--muted") : css("--rule"), "stroke-width": v === 0 ? 1.5 : 1 }));
       svg.appendChild(el("text", { x: x(v), y: yy + 24, "text-anchor": "middle", "font-size": 12, fill: css("--muted") }, v === 0 ? "0" : (v > 0 ? "+" : "−") + Math.abs(v).toFixed(1)));
     });
+    svg.appendChild(el("text", { x: x(0) - 8, y: yy + 42, "text-anchor": "end", "font-size": 12, fill: css("--muted") }, "← lowered recall"));
+    svg.appendChild(el("text", { x: x(0) + 8, y: yy + 42, "font-size": 12, fill: css("--muted") }, "raised recall →"));
     marks.forEach(m => svg.appendChild(m));
     box.appendChild(svg);
-  })();
+  }
+  drawChanges();
 
   /* ---------- Transcripts ---------- */
   const T = D.transcripts;
-  const pickers = [["failing", "Search tools, as first built"], ["kept", "Kept selector"]].filter(([key]) => T[key]);
+  const pickers = [["failing", "Search tools, as first built"], ["kept", "Kept selector (another issue)"]].filter(([key]) => T[key]);
   let current = pickers.length ? pickers[0][0] : null, step = 0;
-  function short(s, n = 420) { s = String(s); return s.length > n ? s.slice(0, n) + " …" : s; }
+  function short(s, n = 520) {
+    s = String(s); if (s.length <= n) return s;
+    const cut = s.lastIndexOf("\n", n); return s.slice(0, cut > 120 ? cut : n) + "\n…";
+  }
   function argsText(a) {
     return Object.entries(a).map(([key, v]) => `${key}: ${Array.isArray(v) ? "[" + v.length + " paths] " + v.slice(0, 3).join(", ") + (v.length > 3 ? ", …" : "") : JSON.stringify(v)}`).join("\n  ");
   }
@@ -518,9 +566,8 @@ python -m bench.report test.jsonl</div>
     document.getElementById("step-prev").disabled = step === 0;
     document.getElementById("step-next").disabled = step === steps.length - 1;
     const found = t.selected.filter(p => needed.has(p)).length;
-    document.getElementById("steps-verdict").innerHTML = step === steps.length - 1
-      ? `<b>Result:</b> ${t.selected.length} files selected, ${found} of the ${t.gold.length} needed.`
-      : "";
+    document.getElementById("steps-verdict").innerHTML =
+      `<b>How this run ended:</b> ${t.selected.length} files selected, ${found} of the ${t.gold.length} the fix needed, after ${steps.length} rounds.`;
   }
   if (current) {
     segmented(document.getElementById("steps-pick"), pickers, current, v => { current = v; step = 0; drawSteps(); });
@@ -530,42 +577,51 @@ python -m bench.report test.jsonl</div>
   }
 
   /* ---------- Lines at 8k ---------- */
-  (function drawLines() {
-    const box = document.getElementById("lines");
-    const rows = [["bm25", "Lexical default, whole files"], ["llm", "Model selector, whole files"], ["llm-lines", "Model selector, line ranges"], ["oracle", "Ceiling: the needed files whole"], ["oracle-lines", "Ceiling: the needed lines"]]
+  function drawLines() {
+    const box = document.getElementById("lines"); box.innerHTML = "";
+    const rows = [["bm25", "Lexical ranker, whole files"], ["llm", "Model selector, whole files"], ["llm-lines", "Model selector, line ranges"], ["oracle", "Perfect choice of whole files"], ["oracle-lines", "Ceiling: the needed lines"]]
       .filter(([m]) => D.curve[m] && D.curve[m][8000]);
-    const W = 940, rowH = 40, L = 290, R = 70;
+    const W = Math.max(330, Math.round(box.clientWidth)), narrow = W < 640;
+    const rowH = narrow ? 52 : 40, L = narrow ? 0 : 290, R = narrow ? 44 : 70;
     const H = rows.length * rowH + 34;
     const x = v => L + (W - L - R) * v;
     const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, width: "100%", role: "img", "aria-label": "Share of the needed lines delivered at 8,000 tokens" });
     [0, 0.25, 0.5, 0.75, 1].forEach(v => {
       svg.appendChild(el("line", { x1: x(v), x2: x(v), y1: 0, y2: rows.length * rowH, stroke: css("--rule") }));
-      svg.appendChild(el("text", { x: x(v), y: rows.length * rowH + 20, "text-anchor": "middle", "font-size": 12, fill: css("--muted") }, String(v)));
+      svg.appendChild(el("text", { x: x(v), y: rows.length * rowH + 20, "text-anchor": v === 0 ? "start" : v === 1 ? "end" : "middle", "font-size": 12, fill: css("--muted") }, String(v)));
     });
     rows.forEach(([m, name], i) => {
-      const d = D.curve[m][8000]; const cy = i * rowH + rowH / 2;
+      const d = D.curve[m][8000]; const cy = narrow ? i * rowH + 34 : i * rowH + rowH / 2;
       const c = m.startsWith("oracle") ? css("--ceil") : css(METHOD[m].c);
-      svg.appendChild(el("text", { x: 0, y: cy + 4, "font-size": 13.5, "font-weight": m === "llm-lines" ? 600 : 400, fill: css("--ink") }, name));
+      svg.appendChild(el("text", { x: 0, y: narrow ? cy - 15 : cy + 4, "font-size": narrow ? 12.5 : 13.5, "font-weight": m === "llm-lines" ? 600 : 400, fill: css("--ink") }, name));
       const bar = el("rect", { x: x(0), y: cy - 9, width: Math.max(2, x(d.line) - x(0)), height: 18, rx: 3, fill: c, "fill-opacity": m.startsWith("oracle") ? 0.35 : 1 });
       bar.appendChild(el("title", {}, `${name}: ${fmt(d.line)} of the needed lines, ${d.tokens.toLocaleString("en-GB")} tokens`));
       svg.appendChild(bar);
-      svg.appendChild(el("text", { x: W - R + 16, y: cy + 4, "font-size": 13, "font-weight": 600, fill: css("--ink") }, fmt(d.line)));
+      svg.appendChild(el("text", { x: W - R + 10, y: cy + 4, "font-size": 13, "font-weight": 600, fill: css("--ink") }, fmt(d.line)));
     });
     box.appendChild(svg);
-  })();
+  }
+  drawLines();
 
   /* ---------- Task browser ---------- */
   let browserBudget = 32000;
+  // One issue from each repository in turn, so the first screen is not one project.
+  const byRepo = {};
+  D.examples.forEach(e => (byRepo[e.repo] = byRepo[e.repo] || []).push(e));
+  const mixed = [];
+  for (let i = 0; mixed.length < D.examples.length; i++)
+    Object.values(byRepo).forEach(list => { if (list[i]) mixed.push(list[i]); });
   const list = document.getElementById("task-list");
   const filter = document.getElementById("task-filter");
-  function dot(pick, color) {
+  function dot(pick, color, total) {
     if (!pick) return `<span class="dot" style="--c:var(--rule)" title="not run"></span>`;
     const cls = pick.recall >= 0.999 ? "full" : pick.recall > 0 ? "part" : "";
-    return `<span class="dot ${cls}" style="--c:var(${color})" title="${fmt(pick.recall)} of needed files"></span>`;
+    const of = pick.hits.length + "/" + total;
+    return `<span class="dot ${cls}" style="--c:var(${color})" title="${of} needed files"></span>${of}`;
   }
   function drawBrowser() {
     const q = filter.value.trim().toLowerCase();
-    const shown = D.examples.filter(e => !q || (e.repo + " " + e.language + " " + e.title).toLowerCase().includes(q));
+    const shown = mixed.filter(e => !q || (e.repo + " " + e.language + " " + e.title).toLowerCase().includes(q));
     document.getElementById("task-count").textContent = `${shown.length} of ${D.examples.length} issues · budget ${k(browserBudget)} tokens`;
     list.innerHTML = shown.slice(0, 400).map(e => {
       const p = m => e.picks[m + "@" + browserBudget];
@@ -576,7 +632,7 @@ python -m bench.report test.jsonl</div>
       }).join("");
       const sum = m => { const pk = p(m); return pk ? `${pk.n} files, ${pk.tokens.toLocaleString("en-GB")} tokens` : "–"; };
       return `<details class="task"><summary><span class="task-title">${escapeHtml(e.title) || "(untitled)"}<small>${e.repo} · ${e.language} · ${e.files.toLocaleString("en-GB")} files</small></span>
-        <span class="dots">${dot(p("bm25"), "--lex")}${dot(p("llm"), "--model")}${browserBudget === 8000 ? dot(lines, "--first") : ""}</span></summary>
+        <span class="dots">${dot(p("bm25"), "--lex", e.needed.length)}${dot(p("llm"), "--model", e.needed.length)}${browserBudget === 8000 ? dot(lines, "--first", e.needed.length) : ""}</span></summary>
         <div class="task-body"><div class="tbl-wrap"><table><thead><tr><th>Needed file</th><th>Tokens</th><th>Lexical</th><th>Model</th></tr></thead><tbody>${rowsHtml}</tbody></table></div>
         <p class="small" style="margin:8px 0 0">Lexical delivered ${sum("bm25")}. Model delivered ${sum("llm")}.${lines && browserBudget === 8000 ? ` With line ranges, ${fmt(lines.line)} of the needed lines.` : ""}</p></div></details>`;
     }).join("");
@@ -586,8 +642,37 @@ python -m bench.report test.jsonl</div>
   filter.addEventListener("input", drawBrowser);
   drawBrowser();
 
+  (function captions() {
+    const c = D.curve, a = c.llm[128000], b = c.bm25[128000];
+    const P = D.pairs || {}, p128 = P["llm-bm25@128000"], p32 = P["llm-bm25@32000"];
+    const sign = v => (v >= 0 ? "+" : "−") + fmt(Math.abs(v));
+    document.getElementById("curve-caption").innerHTML =
+      `<span class="t">Held-out issues; shaded bands are 95% intervals from resampling whole repositories.</span> ` +
+      (p32 && p128 ? `Compared issue by issue, the model selector's lead over the lexical ranker is ${sign(p32.d)} at 32k (${fmt(p32.lo)} to ${fmt(p32.hi)}) and ${sign(p128.d)} at 128k (${fmt(p128.lo)} to ${fmt(p128.hi)}); the bands overlap at 128k only because both methods vary from issue to issue. ` : "") +
+      `Switch to precision and tokens to see how differently they get there: the lexical ranker fills the budget, the model selector chooses a shorter list.`;
+    const L = c["llm-lines"] && c["llm-lines"][8000], W8 = c.llm[8000], O = c["oracle-lines"] && c["oracle-lines"][8000];
+    if (L) {
+      document.getElementById("lines-title").textContent =
+        `Choosing line ranges raises the share of needed lines delivered at 8k from ${fmt(W8.line)} to ${fmt(L.line)}`;
+      document.getElementById("lines-caption").innerHTML =
+        `<span class="t">Held-out issues, at 8,000 tokens.</span> The model's line ranges deliver more of what is needed than whole files, chosen lexically or by the model; the needed lines themselves would reach ${fmt(O ? O.line : 1)}, so most of the gap remains. <code>select --method llm --lines</code> prints the ranges, which <code>pack --stdin</code> reads.`;
+    }
+    document.getElementById("conclusion-text").textContent =
+      `Choosing what a model reads is a measurable problem with a lot of room left. On issues it never saw, a small model with the right instruction delivers ${fmt(c.llm[32000].recall)} of the needed files at 32,000 tokens, against ${fmt(c.bm25[32000].recall)} for a tuned lexical ranker and a ceiling of ${fmt(c.oracle[32000].recall)}. At 8,000 tokens the limit is the unit: whole files do not fit, and choosing lines does better.`;
+  })();
+
   function escapeHtml(s) { return String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]); }
 
+  let resizeTimer, lastWidth = innerWidth;
+  addEventListener("resize", () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+      if (Math.abs(innerWidth - lastWidth) < 40) return;
+      lastWidth = innerWidth;
+      drawCurve(document.querySelector("#curve-measure [aria-pressed=true]").dataset.value);
+      drawChanges(); drawLines();
+    }, 150);
+  });
   // Redraw the drawn charts when the theme changes, since they read colours from it.
   matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => location.reload());
 })();

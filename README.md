@@ -172,7 +172,7 @@ to 0.22; better on 88 issues, worse on 14), and file recall from 0.47 to 0.70. I
 `path:first-last` items, which `pack --stdin` reads.
 
 The model rows cost about 20 million input and 1 million output tokens for the held-out
-run. The needed files are sufficient, not minimal, so precision is understated. Whether the
+run. The needed files are one sufficient set; other files could serve as well, so precision is probably understated. Whether the
 model had seen these repositories and fixes in training was not measured, and each
 configuration was run once. [The web piece](docs/index.html) shows the results with an
 issue-by-issue browser and a selector transcript;
