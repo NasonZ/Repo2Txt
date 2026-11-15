@@ -20,6 +20,7 @@ for computing what a run cost. Haiku 5.5's are for prompts up to 100k tokens, wh
 selector request stays under. DeepSeek's are its peak-hour rates.
 """
 
+import functools
 import importlib.util
 import os
 from dataclasses import dataclass, field
@@ -93,7 +94,13 @@ def complete_for(model: Model):
     path = os.getenv("BENCH_CLIENT")
     if not path:
         raise SystemExit(f"{model.model} needs a native client: set BENCH_CLIENT to its file")
+    return _client_module(path).make_complete(model)
+
+
+@functools.cache
+def _client_module(path: str):
+    """The local client, loaded once per process so its connections and loops are reused."""
     spec = importlib.util.spec_from_file_location("bench_native_client", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    return module.make_complete(model)
+    return module
