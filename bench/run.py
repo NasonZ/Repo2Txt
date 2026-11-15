@@ -182,12 +182,17 @@ def run_task(task: Task, todo: list[tuple[str, int]], meta: dict) -> list[dict]:
         "split": task.split,
         "run": meta,
     }
-    try:
-        repo, names = repository(task)
-    except Exception as exc:
-        reason = f"could not read {task.repo}: {type(exc).__name__}: {exc}"
+    if not (task.query or "").strip():
+        reason = "the dataset gives this task no issue text"
         return [
             base | {"method": m, "budget": b, "status": "skipped", "error": reason} for m, b in todo
+        ]
+    try:
+        repo, names = repository(task)
+    except Exception as exc:  # usually a network failure: an error, so a resumed run retries it
+        reason = f"could not read {task.repo}: {type(exc).__name__}: {exc}"
+        return [
+            base | {"method": m, "budget": b, "status": "error", "error": reason} for m, b in todo
         ]
     readable = set(repo.files)
     gold = {

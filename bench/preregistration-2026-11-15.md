@@ -65,3 +65,14 @@ one run per configuration is taken as adequate for means; single-task results ar
   structure, an interval that includes zero.
 - Token budgets are counted in o200k_base; each provider's own tokeniser differs.
 - Whether models have seen these repositories or fixes in training is not measured.
+
+## Deviations, recorded as they happen
+
+- **One fresh task has no issue text.** `SWE-Bench-Pro__python__maintenance__bugfix__788af515`
+  (ansible/ansible) has an empty `problem_statement` in the dataset, so no method can be
+  given a question for it. It is skipped with that reason; the fresh set is 254 tasks. None
+  of the verified subset's 500 tasks has this defect.
+- **Download failures were being recorded as skips.** Two repositories (huggingface/transformers,
+  cli/cli) failed to download once during the reference run; the runner marked those tasks
+  skipped, which a resumed run does not retry. They are now errors, which it does; the
+  affected rows are removed and the run resumed. No result changes from this, only coverage.
