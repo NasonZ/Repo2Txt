@@ -14,6 +14,7 @@ run can be stopped and resumed. Each row records the code, data and model it cam
 import argparse
 import hashlib
 import json
+import os
 import subprocess
 import time
 from collections.abc import Callable
@@ -252,6 +253,20 @@ def run_task(task: Task, todo: list[tuple[str, int]], meta: dict) -> list[dict]:
     return rows
 
 
+def load_prompt() -> str | None:
+    """Apply an experimental prompt (BENCH_PROMPT, a file with `apply()`), returning its hash."""
+    path = os.getenv("BENCH_PROMPT")
+    if not path:
+        return None
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("bench_prompt", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    module.apply()
+    return f"{Path(path).name}:{hashlib.sha256(Path(path).read_bytes()).hexdigest()[:12]}"
+
+
 def provenance(methods: list[str]) -> dict:
     """What a row came from: the exact code, the data revision and the model settings."""
 
@@ -307,7 +322,8 @@ def main() -> None:
     if unknown:
         parser.error(f"unknown methods {unknown}; choose from {sorted(RUNNERS)}")
     budgets = [parse_budget(b) for b in args.budgets.split(",")]
-    meta = provenance(methods)
+    prompt = load_prompt()
+    meta = provenance(methods) | {"prompt": prompt or "built-in"}
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     # Keep finished rows; drop failed ones and a last line cut short, so they are run again.
