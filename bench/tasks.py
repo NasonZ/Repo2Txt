@@ -1,15 +1,20 @@
 """ContextBench tasks, reduced to what a selection method may see and what scores it."""
 
 import hashlib
+import io
 import json
 import os
 import re
+import tarfile
 import time
 from collections import defaultdict
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import httpx
+
+from repo2txt.models import RepoFile, Repository
+from repo2txt.sources import decode, download_tarball, is_candidate, tar_files
 
 DATASET, CONFIG = "Contextbench/ContextBench", "contextbench_verified"
 ROWS = "https://datasets-server.huggingface.co/rows"
@@ -108,3 +113,24 @@ def sample(count: int, split: str = "dev", seed: str = "repo2txt") -> list[Task]
             if queue and len(chosen) < count:
                 chosen.append(queue.pop(0))
     return chosen
+
+
+def repository(task: Task) -> tuple[Repository, set[str]]:
+    """The repository at the task's commit, and every path in its archive."""
+    owner, name = task.repo.split("/")
+    path = CACHE / "archives" / f"{owner}__{name}" / f"{task.sha}.tar.gz"
+    if not path.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        archive, _ = download_tarball(owner, name, task.sha)
+        partial = path.with_suffix(".part")
+        partial.write_bytes(archive)
+        partial.rename(path)  # An interrupted download never leaves a file that looks whole.
+    archive = path.read_bytes()
+    with tarfile.open(fileobj=io.BytesIO(archive), mode="r:gz") as tar:
+        names = {m.name.partition("/")[2] for m in tar if m.isfile()}
+    files = {}
+    for file_path, data in tar_files(archive, lambda p, size: is_candidate(p, size, 1_000_000)):
+        if (text := decode(data)) is not None:
+            files[file_path] = RepoFile(file_path, text)
+    where = ["-r", task.repo, "--ref", task.sha]
+    return Repository(name, where, task.sha, dict(sorted(files.items()))), names

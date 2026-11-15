@@ -122,3 +122,25 @@ def test_bad_tool_arguments_change_nothing_and_always_get_a_reply():
     calls = [m for m in selector.messages if m["role"] == "assistant" and m.get("tool_calls")]
     assert len(results(script)) == len(calls) == 5
     assert all("Nothing was changed" in text or "no tool" in text for text in results(script)[1:])
+
+
+def test_line_ranges_come_first_and_the_rest_of_the_budget_takes_whole_files(repo):
+    from repo2txt.api import repo_pack, select_lines
+
+    def complete(messages, tools):
+        names = [tool["function"]["name"] for tool in tools]
+        if "read_ranges" in names:
+            ranges = ["src/large.py:3-6", "src/large.py:5-8", "nope.py:1-2", "src/small.py:9-1"]
+            return Reply("", [Call("r", "read_ranges", {"ranges": ranges})])
+        if names and not any(m["role"] == "tool" for m in messages):
+            paths = ["src/large.py", "src/small.py"]
+            return Reply("", [Call("s", "select_files", {"paths": paths})])
+        return Reply("Done.")
+
+    items = select_lines(repo, "function 2", 1500, complete)
+
+    assert items[0][0] == "src/large.py:3-8"  # overlapping ranges merged, bad ones ignored
+    assert ("src/small.py", repo.files["src/small.py"].cost) in items  # filled whole
+    assert sum(cost for _, cost in items) <= 1500
+    packed = repo_pack(repo, [item for item, _ in items], 1500 + 60)
+    assert not packed.omitted

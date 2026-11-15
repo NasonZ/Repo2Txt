@@ -7,26 +7,25 @@ run can be stopped and resumed.
 """
 
 import argparse
-import io
 import json
 import os
 import subprocess
-import tarfile
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from repo2txt import rank
+from repo2txt.api import select_lines
 from repo2txt.llm import LLMSettings, openai_complete
-from repo2txt.models import RepoFile, Repository
+from repo2txt.models import Repository
 from repo2txt.selection import fit
 from repo2txt.selector import Selector
-from repo2txt.sources import decode, download_tarball, is_candidate, tar_files
 from repo2txt.tokens import parse_budget
 
+from . import packing
 from .metrics import Gold, resolve, score
-from .tasks import CACHE, Task, sample
+from .tasks import Task, repository, sample
 
 # A method returns ranked paths and what it cost: (paths, input tokens, output tokens).
 Method = Callable[[Repository, Task, Gold, int], tuple[list[str], int, int]]
@@ -54,10 +53,57 @@ def oracle(repo: Repository, task: Task, gold: Gold, budget: int) -> tuple[list[
     return sorted(readable, key=lambda p: repo.files[p].tokens), 0, 0
 
 
+_chosen: dict[tuple[str, int], tuple[list[str], int, int]] = {}
+
+
 def llm(repo: Repository, task: Task, gold: Gold, budget: int) -> tuple[list[str], int, int]:
-    selector = Selector(repo, budget, openai_complete(LLMSettings.from_env()))
-    selector.ask(task.query)
-    return selector.selection.paths, selector.input_tokens, selector.output_tokens
+    key = (task.id, budget)
+    if key not in _chosen:
+        selector = Selector(repo, budget, openai_complete(LLMSettings.from_env()))
+        selector.ask(task.query)
+        _chosen[key] = (selector.selection.paths, selector.input_tokens, selector.output_tokens)
+    return _chosen[key]
+
+
+def llm_lines(repo: Repository, task: Task, gold: Gold, budget: int):
+    """The model's choice at four times the budget, narrowed to line ranges that fit.
+
+    Only the second stage's tokens are counted here; the first stage is the llm row at 4x.
+    """
+    chosen, _, _ = llm(repo, task, gold, budget * 4)
+    usage = [0, 0]
+
+    def complete(messages, tools):
+        reply = openai_complete(LLMSettings.from_env())(messages, tools)
+        usage[0] += reply.input_tokens
+        usage[1] += reply.output_tokens
+        return reply
+
+    items = select_lines(repo, task.query, budget, complete, chosen=chosen)
+    return _shown(items), sum(cost for _, cost in items), usage[0], usage[1]
+
+
+def oracle_lines(repo: Repository, task: Task, gold: Gold, budget: int):
+    """The needed lines themselves, smallest span first: the ceiling for any packing."""
+    shown, used = packing.oracle_lines(repo, task.spans, gold.files, budget)
+    return shown, used, 0, 0
+
+
+def _shown(items: list[tuple[str, int]]) -> dict[str, set[int] | None]:
+    shown: dict[str, set[int] | None] = {}
+    for item, _ in items:
+        path, _, span = item.rpartition(":")
+        if path and "-" in span and span.replace("-", "").isdigit():
+            first, last = (int(x) for x in span.split("-"))
+            if shown.get(path, set()) is not None:
+                shown.setdefault(path, set()).update(range(first, last + 1))
+        else:
+            shown[item] = None
+    return shown
+
+
+# Methods scored by the lines they show, not by whole files kept in rank order.
+LINE_RUNNERS = {"llm-lines": llm_lines, "oracle-lines": oracle_lines}
 
 
 RUNNERS: dict[str, Method] = {
@@ -67,27 +113,6 @@ RUNNERS: dict[str, Method] = {
     "oracle": oracle,
     "llm": llm,
 }
-
-
-def repository(task: Task) -> tuple[Repository, set[str]]:
-    """The repository at the task's commit, and every path in its archive."""
-    owner, name = task.repo.split("/")
-    path = CACHE / "archives" / f"{owner}__{name}" / f"{task.sha}.tar.gz"
-    if not path.exists():
-        path.parent.mkdir(parents=True, exist_ok=True)
-        archive, _ = download_tarball(owner, name, task.sha)
-        partial = path.with_suffix(".part")
-        partial.write_bytes(archive)
-        partial.rename(path)  # An interrupted download never leaves a file that looks whole.
-    archive = path.read_bytes()
-    with tarfile.open(fileobj=io.BytesIO(archive), mode="r:gz") as tar:
-        names = {m.name.partition("/")[2] for m in tar if m.isfile()}
-    files = {}
-    for file_path, data in tar_files(archive, lambda p, size: is_candidate(p, size, 1_000_000)):
-        if (text := decode(data)) is not None:
-            files[file_path] = RepoFile(file_path, text)
-    where = ["-r", task.repo, "--ref", task.sha]
-    return Repository(name, where, task.sha, dict(sorted(files.items()))), names
 
 
 def run_task(number: int, task: Task, todo: list[tuple[str, int]], meta: dict) -> list[dict]:
@@ -103,12 +128,21 @@ def run_task(number: int, task: Task, todo: list[tuple[str, int]], meta: dict) -
     rows = []
     for method, budget in todo:
         started = time.time()
+        shown = None
         try:
-            ranked, tokens_in, tokens_out = RUNNERS[method](repo, task, gold, budget)
+            if method in LINE_RUNNERS:
+                shown, used, tokens_in, tokens_out = LINE_RUNNERS[method](repo, task, gold, budget)
+                ranked = list(shown)
+            else:
+                ranked, tokens_in, tokens_out = RUNNERS[method](repo, task, gold, budget)
             error = None
         except Exception as exc:  # A failed call is recorded, reported, and run again next time.
             ranked, tokens_in, tokens_out, error = [], 0, 0, f"{type(exc).__name__}: {exc}"
-        selected, _ = fit(ranked, repo, budget)
+        selected = ranked if shown is not None else fit(ranked, repo, budget)[0]
+        if shown is None:
+            shown = dict.fromkeys(selected)
+            used = repo.cost(selected)
+        lines = packing.score_lines(shown, task.spans, gold.files)
         rows.append(
             {
                 "task": task.id,
@@ -124,8 +158,9 @@ def run_task(number: int, task: Task, todo: list[tuple[str, int]], meta: dict) -
                 "gold_unresolved": len(gold.unresolved),
                 "gold_filtered": len(gold.filtered),
                 "selected": len(selected),
-                "tokens": repo.cost(selected),
+                "tokens": used,
                 **score(selected, gold.files, task.spans),
+                "line_recall": lines["line_recall"],
                 "paths": selected,
                 "input_tokens": tokens_in,
                 "output_tokens": tokens_out,
@@ -167,6 +202,10 @@ def main() -> None:
                 rows.append(row)
         out.write_text("".join(json.dumps(row) + "\n" for row in rows))
     done = {(row["task"], row["method"], row["budget"]) for row in rows}
+    # A model selection already made is reused, so a later method that builds on it is cheap.
+    for row in rows:
+        if row["method"] == "llm":
+            _chosen[(row["task"], row["budget"])] = (row["paths"], 0, 0)
     commit = subprocess.run(
         ["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True
     ).stdout.strip()

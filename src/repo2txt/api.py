@@ -127,12 +127,29 @@ def repo_select(
     budget: int = 32_000,
     method: str = "bm25",
     complete: Complete | None = None,
+    lines: bool = False,
 ) -> SelectResult:
-    """Rank files against `query` and keep, in rank order, those that fit `budget` when packed."""
+    """Rank files against `query` and keep, in rank order, those that fit `budget` when packed.
+
+    With `lines` (model method only), the model then chooses line ranges from outlines of the
+    files it picked, and items may be `path:first-last`.
+    """
     _require_files(repo)
     if method not in METHODS:
         raise Problem(f"Unknown method {method!r}. Use one of: {', '.join(METHODS)}.")
     room = max(budget - HEAD_TOKENS, 0)
+    if lines:
+        if method != "llm":
+            raise Problem("Line ranges are chosen by the model: use --method llm with --lines.")
+        items = select_lines(repo, query, room, complete or _default_complete())
+        if not items:
+            raise Problem(f"The model chose nothing in {repo.name} for {query!r}.")
+        rows = [Ranked(item, cost, float(len(items) - i)) for i, (item, cost) in enumerate(items)]
+        total = sum(cost for _, cost in items)
+        hint = [_cmd("pack", repo, ["-b", str(budget)], [item for item, _ in items[:3]])]
+        return SelectResult(
+            repo.name, repo.ref, query, method, budget, total, len(items), rows, [], hint
+        )
     ranked = METHODS[method](repo, query, room, complete)
     if not ranked:
         raise Problem(f"Nothing in {repo.name} matches {query!r}.", [_cmd("map", repo)])
@@ -296,13 +313,80 @@ def _cmd(
     return " ".join(shlex.quote(word) for word in [*words, *args])
 
 
+def select_lines(
+    repo: Repository,
+    query: str,
+    budget: int,
+    complete: Complete,
+    chosen: list[str] | None = None,
+) -> list[tuple[str, int]]:
+    """Files chosen at four times the budget, narrowed by the model to line ranges that fit.
+
+    The ranges come first, in the model's order; the rest of the budget goes to the chosen
+    files whole, in the order they were chosen. Returns `(item, cost)` pairs, where an item is
+    a path or `path:first-last`. `chosen` skips the first stage when it has already been run.
+    """
+    from .selector import choose_ranges
+
+    if chosen is None:
+        chosen = [path for path, _ in _llm(repo, query, budget * 4, complete)]
+    ranges, _, _ = choose_ranges(repo, chosen, query, budget, complete)
+
+    shown: dict[str, set[int] | None] = {}
+
+    def cost(path: str, lines: set[int] | None) -> int:
+        if lines is None:
+            return repo.files[path].cost
+        return sum(c for _, c in _intervals(repo, path, lines))
+
+    used = 0
+    for path, first, last in ranges:
+        if shown.get(path, set()) is None:
+            continue
+        new = (shown.get(path) or set()) | set(range(first, last + 1))
+        change = cost(path, new) - (cost(path, shown[path]) if path in shown else 0)
+        if used + change <= budget:
+            shown[path], used = new, used + change
+    for path in chosen:
+        change = repo.files[path].cost - (cost(path, shown[path]) if path in shown else 0)
+        if shown.get(path, set()) is not None and used + change <= budget:
+            shown[path], used = None, used + change
+
+    items: list[tuple[str, int]] = []
+    for path, lines in shown.items():
+        items += [(path, repo.files[path].cost)] if lines is None else _intervals(repo, path, lines)
+    return items
+
+
+def _intervals(repo: Repository, path: str, lines: set[int]) -> list[tuple[str, int]]:
+    """Contiguous runs of `lines` as `path:first-last` items, with what each costs to pack."""
+    text = repo.files[path].text.split("\n")
+    runs: list[list[int]] = []
+    for n in sorted(lines):
+        if runs and n == runs[-1][1] + 1:
+            runs[-1][1] = n
+        else:
+            runs.append([n, n])
+    out = []
+    for first, last in runs:
+        label = f"{path}:{first}-{last}"
+        body = "\n".join(text[first - 1 : last])
+        out.append((label, count_tokens(body) + count_tokens(label) + FRAME_TOKENS))
+    return out
+
+
+def _default_complete() -> Complete:
+    from .llm import LLMSettings, openai_complete
+
+    return openai_complete(LLMSettings.from_env())
+
+
 def _llm(
     repo: Repository, query: str, budget: int, complete: Complete | None
 ) -> list[tuple[str, float]]:
-    from .llm import LLMSettings, openai_complete
     from .selector import Selector
 
-    selector = Selector(repo, budget, complete or openai_complete(LLMSettings.from_env()))
+    selector = Selector(repo, budget, complete or _default_complete())
     selector.ask(query)
     # The model gives an order, not scores: rank 1 scores highest.
     count = len(selector.selection.paths)

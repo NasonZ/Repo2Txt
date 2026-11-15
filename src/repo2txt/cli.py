@@ -108,15 +108,20 @@ def map(repo, directory, max_tokens, depth, as_json):
 @repository
 @click.option("-b", "--budget", type=Budget(), default="32k", show_default=True)
 @click.option("--method", type=click.Choice(list(METHODS)), default="bm25", show_default=True)
+@click.option(
+    "--lines",
+    is_flag=True,
+    help="With --method llm, choose line ranges, not whole files. Helps most at small budgets.",
+)
 @click.option("--max-tokens", type=Budget(), default="4k", show_default=True, help="Output cap.")
 @click.option("--json", "as_json", is_flag=True, help="Print JSON.")
-def select(repo, query, budget, method, max_tokens, as_json):
+def select(repo, query, budget, method, lines, max_tokens, as_json):
     """Rank files for QUERY and list those that fit the budget, best first.
 
     Prints paths and token counts, not contents: pipe the result to `pack --stdin`.
     bm25 needs no model. llm asks the model named by LLM_MODEL to choose from the tree.
     """
-    result = repo_select(repo, query, budget, method)
+    result = repo_select(repo, query, budget, method, lines=lines)
     click.echo(
         render.as_json(result, max_tokens) if as_json else render.select_text(result, max_tokens)
     )

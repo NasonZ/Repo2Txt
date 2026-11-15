@@ -4,7 +4,7 @@ import json
 from collections.abc import Callable
 from typing import Any
 
-from . import rank, tree
+from . import focus, rank, tree
 from .api import repo_map
 from .llm import Call, Complete
 from .models import Repository
@@ -210,3 +210,58 @@ def _assistant(text: str, calls: list[Call]) -> dict[str, Any]:
             for c in calls
         ]
     return message
+
+
+RANGES_PROMPT = """\
+<outlines>
+{outlines}
+</outlines>
+
+Above are outlines of the files chosen as relevant to the request below. Each line gives a \
+block's line range, its size in tokens, and the line that opens it. Choose the line ranges \
+someone needs to read to deal with the request, within {budget:,} tokens in total. Whoever \
+reads them works from those lines alone: a part they need and were not given stops them, and \
+an extra part costs only its tokens, so lean towards including. Include the definitions the \
+relevant code relies on and the code that calls it, not only the place of the change. A range \
+can cover a whole small file. Give the most important ranges first.
+
+<request>
+{request}
+</request>"""
+RANGES_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "read_ranges",
+        "description": "The line ranges to read, most important first, as path:first-last.",
+        "parameters": {
+            "type": "object",
+            "properties": {"ranges": {"type": "array", "items": {"type": "string"}}},
+            "required": ["ranges"],
+        },
+    },
+}
+
+
+def choose_ranges(
+    repo: Repository, paths: list[str], request: str, budget: int, complete: Complete
+) -> tuple[list[tuple[str, int, int]], int, int]:
+    """Ask the model which line ranges of `paths` to read within `budget`.
+
+    Returns the ranges in the model's order, and the input and output tokens it used.
+    """
+    outlines = "\n\n".join(focus.outline(p, repo.files[p].text) for p in paths)
+    prompt = RANGES_PROMPT.format(outlines=outlines, budget=budget, request=request)
+    reply = complete([{"role": "user", "content": prompt}], [RANGES_TOOL])
+    ranges = []
+    for call in reply.calls:
+        if call.name != "read_ranges" or not call.arguments:
+            continue
+        for item in call.arguments.get("ranges", []):
+            path, _, span = str(item).strip().rpartition(":")
+            first, _, last = span.partition("-")
+            if path in repo.files and first.isdigit() and last.isdigit():
+                lines = len(repo.files[path].text.split("\n"))
+                first, last = max(1, int(first)), min(lines, int(last))
+                if first <= last:
+                    ranges.append((path, first, last))
+    return ranges, reply.input_tokens, reply.output_tokens

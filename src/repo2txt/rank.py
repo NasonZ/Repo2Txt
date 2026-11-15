@@ -22,7 +22,7 @@ _SECONDARY = re.compile(
     r"(^|/)(tests?|testing|spec|specs|__tests__|docs?|examples?|fixtures)/"
     r"|(^|/)test_|_test\.|\.test\.|\.spec\.|\.(md|rst|txt|adoc)$"
 )
-_STOP = frozenset(
+STOP = frozenset(
     "a an and are as at be but by do does for from how in is it its of on or so that the this "
     "to was we what when where which why with".split()
 )
@@ -48,14 +48,22 @@ def bm25(repo: Repository, query: str, boosts: bool = True) -> list[tuple[str, f
     """
     key = ("bm25", query, boosts)
     if key not in repo.cache:
-        repo.cache = {k: v for k, v in repo.cache.items() if k[0] != "bm25"} | {
-            key: _bm25(repo, query, boosts)
-        }
+        result = _bm25(repo, query, boosts)
+        # Keep the rankings for one query at a time.
+        for old in [k for k in repo.cache if k[0] in ("bm25", "idf") and k[1] != query]:
+            del repo.cache[old]
+        repo.cache[key] = result
     return repo.cache[key]
 
 
+def idf(repo: Repository, query: str) -> dict[str, float]:
+    """How rare each of the query's words is across the repository's files."""
+    bm25(repo, query)
+    return repo.cache.get(("idf", query), {})
+
+
 def _bm25(repo: Repository, query: str, boosts: bool) -> list[tuple[str, float]]:
-    wanted = {t for t in terms(query) if t not in _STOP}
+    wanted = {t for t in terms(query) if t not in STOP}
     if not wanted or not repo.files:
         return []
 
@@ -89,6 +97,7 @@ def _bm25(repo: Repository, query: str, boosts: bool) -> list[tuple[str, float]]
     containing = Counter(term for found in counts.values() for term in found)
     idf = {t: math.log(1 + (total - n + 0.5) / (n + 0.5)) for t, n in containing.items()}
 
+    repo.cache[("idf", query)] = idf
     scores = {}
     for path, found in counts.items():
         norm = K1 * (1 - B + B * lengths[path] / average)
