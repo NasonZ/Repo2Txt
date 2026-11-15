@@ -193,7 +193,7 @@ class Selector:
 
 
 def _paths(value: Any) -> list[str]:
-    if isinstance(value, (list, tuple)) and all(isinstance(item, str) for item in value):
+    if isinstance(value, list | tuple) and all(isinstance(item, str) for item in value):
         return list(value)
     raise ValueError("paths must be a list of strings")
 

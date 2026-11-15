@@ -137,7 +137,7 @@ def pack(repo, items, from_stdin, budget, fmt, output, as_json):
     whole repository is packed, smallest files first. Files that do not fit are listed, not cut.
     """
     if from_stdin:
-        lines = (line.split("\t")[0].strip() for line in sys.stdin)
+        lines = (line.split("\t")[0].strip() for line in sys.stdin.read().splitlines())
         items += tuple(line for line in lines if line and not line.startswith("#"))
         if not items:
             raise Problem("Nothing to pack: standard input named no files.")
