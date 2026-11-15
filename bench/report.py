@@ -30,17 +30,17 @@ def table(rows: list[dict]) -> str:
     for row in rows:
         cells[(row["method"], row["budget"])].append(row)
     lines = [
-        "| Method | Budget | Tasks | Recall (95% CI) | Code recall | Precision | All gold "
+        "| Method | Budget | Tasks | Recall (95% CI) | Line recall | Precision | All gold "
         "| Tokens used |",
         "|---|---|---|---|---|---|---|---|",
     ]
     for (method, budget), group in sorted(cells.items(), key=lambda item: (item[0][1], item[0][0])):
         low, high = interval(group, "recall")
-        code = [r["recall_code"] for r in group if r["recall_code"] is not None]
         lines.append(
             f"| {method} | {budget // 1000}k | {len(group)} | "
             f"{mean(r['recall'] for r in group):.2f} ({low:.2f}-{high:.2f}) | "
-            f"{mean(code):.2f} | {mean(r['precision'] for r in group):.2f} | "
+            f"{mean(r['line_recall'] for r in group):.2f} | "
+            f"{mean(r['precision'] for r in group):.2f} | "
             f"{mean(r['all_gold'] for r in group):.0%} | "
             f"{mean(r['tokens'] for r in group):,.0f} |"
         )

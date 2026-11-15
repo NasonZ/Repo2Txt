@@ -8,6 +8,10 @@ TEST_PATH = re.compile(
 )
 
 
+def _lines(spans: list[list], files: set[str]) -> int:
+    return sum(last - first + 1 for file, first, last in spans if file in files)
+
+
 @dataclass
 class Gold:
     """The gold files of a task, checked against the repository at its commit."""
@@ -26,8 +30,12 @@ def resolve(gold: list[str], in_archive: set[str], readable: set[str]) -> Gold:
     )
 
 
-def score(selected: list[str], gold: list[str]) -> dict[str, float]:
+def score(selected: list[str], gold: list[str], spans: list[list]) -> dict[str, float]:
     """File-level recall, precision and F1 of `selected` against `gold`.
+
+    `line_recall` is the share of the needed lines that were delivered: a file counts for as
+    many lines as were marked in it, so missing the file that holds most of the answer costs
+    more than missing one that holds a line.
 
     `recall_code` leaves test files out of the gold, since a method told to skip tests should
     not be marked down for it. It is None when the gold is tests only.
@@ -43,4 +51,5 @@ def score(selected: list[str], gold: list[str]) -> dict[str, float]:
         "f1": 2 * recall * precision / (recall + precision) if hit else 0.0,
         "all_gold": float(wanted <= chosen),
         "recall_code": len(chosen & code) / len(code) if code else None,
+        "line_recall": _lines(spans, chosen & wanted) / (_lines(spans, wanted) or 1),
     }

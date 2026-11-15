@@ -2,6 +2,8 @@
 
 from dataclasses import dataclass, field
 
+from .models import Repository
+
 
 @dataclass
 class Node:
@@ -41,6 +43,14 @@ def build_tree(token_map: dict[str, int]) -> Node:
             node = node.children.setdefault(part, Node(walked))
         node.tokens, node.files = tokens, 1
     return root
+
+
+def of(repo: Repository) -> Node:
+    """The tree of a repository, built once."""
+    if "tree" not in repo.cache:
+        repo.count()
+        repo.cache["tree"] = build_tree({p: f.tokens for p, f in repo.files.items()})
+    return repo.cache["tree"]
 
 
 def find(root: Node, prefix: str) -> Node | None:

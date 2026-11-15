@@ -1,10 +1,10 @@
-"""Choosing files with a model: one prompt, three tools, a short loop."""
+"""Choosing files with a model: a prompt, three tools, a short loop."""
 
 import json
 from collections.abc import Callable
 from typing import Any
 
-from . import tree
+from . import rank, tree
 from .api import repo_map
 from .llm import Call, Complete
 from .models import Repository
@@ -16,32 +16,49 @@ MAX_ROUNDS = 5
 # Tokens of the system prompt given to the repository tree. Deeper directories are collapsed
 # and reached with list_dir.
 TREE_TOKENS = 6000
+# How many lexically ranked files are shown beside each request, as leads.
+SHORTLIST = 30
 LIST_LIMIT = 200
 
 SYSTEM = """\
-You choose which files of the repository `{name}` someone should read to deal with a request.
-You cannot read the files; you see their paths and sizes in tokens.
-
-Budget: {budget:,} tokens. A selection that would exceed it is refused and left unchanged.
-Selected so far: {selected}
-
-Prefer the files where the behaviour in question is implemented, then what they depend on to \
-be understood. Leave out tests, fixtures and documentation unless the request is about them. \
-Give paths exactly as listed, most important first.
-
-Tools:
-- select_files(paths): replace the whole selection.
-- adjust_selection(add, remove): change part of it.
-- list_dir(path): list a directory that is shown collapsed below.
-
-When the selection is right, reply in one or two sentences saying what you chose and why.
-
-The repository follows. Indentation shows nesting, so a file's path is its directory names
-and its own name joined with `/`, as in `src/app/main.py`. A directory line reads
-`name/ tokens (files)`; directories shown without their contents are collapsed.
-
+<repository name="{name}">
 {tree}
+</repository>
+
+You choose which files of the repository above someone should read to deal with a request. \
+Whoever reads your selection works from those files alone. A file they need and were not \
+given stops them; a file they did not need costs only its tokens. So lean towards including.
+
+How to read the repository: indentation shows nesting, so a file's path is its directory \
+names and its own name joined with `/`, as in `src/app/main.py`. A directory line reads \
+`name/ tokens (files)`; a directory shown without its contents is collapsed, and list_dir \
+opens it. Sizes are in tokens.
+
+Start with the files where the behaviour in the request is implemented. Then add what a \
+reader needs to follow them: the definitions they rely on, the code that calls them, and \
+any configuration or schema they read. Add the closest tests last, if there is room. A \
+selection that uses a small part of the budget has usually left something out, so aim to \
+use most of it, and keep going after the first plausible files.
+
+Budget: {budget:,} tokens. A change that would exceed it is refused and leaves the selection \
+as it was. Selected so far: {selected}
+
+You have {rounds} rounds of tool calls. Calls that do not depend on each other can go in \
+the same round. Give paths exactly as they appear, most important first. When the selection \
+covers the request, reply in one or two sentences saying what you chose and why.
 """
+
+CANDIDATES = """\
+<candidates>
+The files a word search ranks highest for this request, best first, with sizes in tokens. \
+It finds files that mention the request's terms and misses ones that do not, so treat these \
+as leads to weigh with the tree, not as the answer.
+{rows}
+</candidates>
+
+<request>
+{request}
+</request>"""
 
 _PATHS = {"type": "array", "items": {"type": "string"}}
 SCHEMAS = [
@@ -89,10 +106,16 @@ class Selector:
 
     def ask(self, request: str) -> str:
         """Add a request to the conversation, let the model work, and return its reply."""
+        leads = [path for path, _ in rank.bm25(self.repo, request)[:SHORTLIST]]
+        if leads:
+            self.repo.count(leads)
+            rows = "\n".join(f"{p} {self.repo.files[p].tokens:,}" for p in leads)
+            request = CANDIDATES.format(rows=rows, request=request)
         self.messages.append({"role": "user", "content": request})
         for round_number in range(MAX_ROUNDS + 1):
             # After the last round the model must answer in words.
-            reply = self.complete(self._conversation(), TOOLS if round_number < MAX_ROUNDS else [])
+            tools = TOOLS if round_number < MAX_ROUNDS else []
+            reply = self.complete(self._conversation(), tools)
             self.input_tokens += reply.input_tokens
             self.output_tokens += reply.output_tokens
             self.messages.append(_assistant(reply.text, reply.calls))
@@ -116,6 +139,7 @@ class Selector:
             budget=selection.budget,
             selected=selected,
             tree=self._tree,
+            rounds=MAX_ROUNDS,
         )
         return [{"role": "system", "content": system}, *self.messages]
 
@@ -127,22 +151,25 @@ class Selector:
         if call.arguments is None:
             return f"The arguments for {call.name} were not valid JSON. Nothing was changed."
         try:
-            return handler(**call.arguments)
+            result = handler(**call.arguments)
         except (TypeError, ValueError) as exc:
             return f"Bad arguments for {call.name}: {exc}. Nothing was changed."
+        # Every reply says where the budget stands, so the model can see what room is left.
+        selection = self.selection
+        left = selection.budget - selection.total
+        used = f"{len(selection.paths)} files, {selection.total:,} of {selection.budget:,} tokens"
+        return f"{result}\n[Selected: {used}; {left:,} left]"
 
     def _report(self, change: Change) -> str:
         """Tell the model what its change did, in terms it can act on."""
-        selection = self.selection
-        state = f"{len(selection.paths)} files, {selection.total:,} of {selection.budget:,} tokens"
         parts = []
         if not change.applied:
             parts.append(
                 f"Refused: that would be {change.over_by:,} tokens over the budget. The "
-                f"selection is unchanged ({state}). Choose fewer or smaller files."
+                "selection is unchanged. Choose fewer or smaller files."
             )
         else:
-            parts.append(f"Done. Selection: {state}.")
+            parts.append("Done.")
         if change.unknown:
             parts.append(
                 "These paths are not in the repository or the selection and were ignored: "
@@ -152,8 +179,7 @@ class Selector:
         return " ".join(parts)
 
     def _list_dir(self, path: str = "") -> str:
-        root = tree.build_tree({p: f.tokens for p, f in self.repo.files.items()})
-        node = tree.find(root, path)
+        node = tree.find(tree.of(self.repo), path)
         if node is None or not node.is_dir:
             return f"There is no directory {path!r}. Use a directory path from the tree."
         items = tree.entries(node, 1)
@@ -167,7 +193,7 @@ class Selector:
 
 
 def _paths(value: Any) -> list[str]:
-    if isinstance(value, (list, tuple)) and all(isinstance(item, str) for item in value):
+    if isinstance(value, list | tuple) and all(isinstance(item, str) for item in value):
         return list(value)
     raise ValueError("paths must be a list of strings")
 

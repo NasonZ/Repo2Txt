@@ -123,11 +123,43 @@ export LLM_BASE_URL=http://localhost:8080/v1  # optional; any OpenAI-compatible 
 repo2txt select "how are sessions invalidated on logout" --method llm -b 30k
 ```
 
-The model sees the tree with token counts, collapsed to about 6,000 tokens, and has three
-tools: replace the selection, adjust it, and list a collapsed directory. It cannot read file
+The model sees the tree with token counts, collapsed to about 6,000 tokens, and the 30 files
+the lexical ranking puts first for the request. It has three tools: replace the selection,
+adjust it, and list a collapsed directory. It cannot read file
 contents. Every path is checked against the repository, and a change that would exceed the
 budget is refused and explained, so the result always fits. It gets five rounds of tool calls
 per request. These variables can also go in a `.env` file.
+
+## How well it selects
+
+Measured on [ContextBench](https://huggingface.co/datasets/Contextbench/ContextBench) tasks:
+real issues, each with the files a person judged necessary to resolve it. A method is given
+the issue text and the repository at that commit. Recall is the share of the needed files it
+fitted into the budget; precision is the share of what it chose that was needed.
+
+| Method | 8k tokens | 32k tokens | 128k tokens |
+|---|---|---|---|
+| Smallest files first | 0.01 | 0.03 | 0.13 |
+| BM25 alone | 0.15 | 0.29 | 0.47 |
+| `select` (BM25 with three added signals) | 0.28 (0.11) | 0.47 (0.10) | 0.67 (0.07) |
+| `select --method llm` (claude-haiku-5-5) | 0.47 (0.38) | 0.68 (0.33) | 0.77 (0.27) |
+| The needed files themselves | 0.60 | 0.92 | 1.00 |
+
+Recall, with precision in brackets. The first three rows and the last are 281 tasks from 40
+repositories; the model row is 100 of those tasks. These are the tasks the methods were
+tuned on, so they flatter the result. A further 219 tasks from 19 other repositories are
+held out and have not been run.
+
+What the numbers say. The lexical default finds about half the needed files at 32k and
+fills the budget doing it: nine files in ten that it returns are not needed. A small model
+choosing from the tree and the lexical shortlist finds two thirds, with a third of its
+choices needed. The last row is the ceiling: at 8k even a perfect selection reaches 0.60,
+because the needed files often do not fit whole.
+
+The needed files are sufficient, not minimal, so precision is understated. Whether the
+models had seen these repositories and fixes in training was not measured.
+[docs/report-2026-11-14.md](docs/report-2026-11-14.md) is the full account: each experiment,
+what was tried and dropped, and the limits. `python -m bench.run` reproduces the rows.
 
 ## How it is put together
 
