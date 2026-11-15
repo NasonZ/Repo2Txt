@@ -1,0 +1,44 @@
+{
+ "sample": "01323034afde8983e978b8d2",
+ "task_type": "comment2context",
+ "repo": "astral-sh/ruff",
+ "query": "diff_hunk_context:\n@@ -446,6 +446,25 @@ impl<'db> OverloadLiteral<'db> {\n     /// a cross-module dependency directly on the full AST which will lead to cache\n     /// over-invalidation.\n     pub(super) fn raw_signature(self, db: &'db dyn Db) -> Signature<'db> {\n\ngiven_file:\ncrates/ty_python_semantic/src/types/function.rs\n\nline:\n467\n\npath:\ncrates/ty_python_semantic/src/types/function.rs\n\npr_title:\n[ty] Preserve lexical ParamSpec scope for returned Callable annotations\n\nreview_comment:\nCould we move the `return_callable_typevar_scope` at the top-level (the functions that are salsa cached) to avoid adding another method?",
+ "gold": [
+  "crates/ty_python_semantic/src/types/infer/builder.rs"
+ ],
+ "selected": [
+  "crates/ty_python_semantic/src/types/function.rs",
+  "crates/ty_python_semantic/src/types/signatures.rs",
+  "crates/ty_python_semantic/src/types/generics.rs",
+  "crates/ty_python_semantic/src/types/infer/builder/function.rs"
+ ],
+ "gold_in_shortlist": [
+  "crates/ty_python_semantic/src/types/infer/builder.rs"
+ ],
+ "turns": [
+  {
+   "messages_in": 2,
+   "reply": "",
+   "calls": [
+    {
+     "tool": "select_files",
+     "args": {
+      "paths": [
+       "crates/ty_python_semantic/src/types/function.rs",
+       "crates/ty_python_semantic/src/types/signatures.rs",
+       "crates/ty_python_semantic/src/types/generics.rs",
+       "crates/ty_python_semantic/src/types/infer/builder/function.rs"
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "messages_in": 4,
+   "reply": "I kept the four files already selected: `function.rs` (where the review comment's line sits), `signatures.rs`, `generics.rs`, and `infer/builder/function.rs`. They cover the `OverloadLiteral::raw_signature` path and the signature and typevar-scope code it touches. About 960 tokens remain, too few for another useful file, so I stopped there.",
+   "calls": []
+  }
+ ],
+ "input_tokens": 16033,
+ "output_tokens": 698
+}

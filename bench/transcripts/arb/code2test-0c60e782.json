@@ -1,0 +1,47 @@
+{
+ "sample": "0c60e782db37a60abbcd178d",
+ "task_type": "code2test",
+ "repo": "etcd-io/etcd",
+ "query": "changed_file:\ncache/cache.go\n\npr_body:\nAdd Cache.RequestProgress() method that mirrors the etcd Watcher.RequestProgress API but is served entirely from the cache. It broadcasts a progress notification at the cache's current revision to all active local watchers.\n\nAlso, used AI for writing tests.\n\nPart of #19371\n\npr_title:\ncache: Add on-demand progress notification from cache",
+ "gold": [
+  "cache/demux_test.go",
+  "tests/integration/cache_test.go"
+ ],
+ "selected": [
+  "cache/cache.go",
+  "cache/progress_requestor.go",
+  "cache/demux.go",
+  "cache/watcher.go",
+  "cache/config.go",
+  "cache/ready.go"
+ ],
+ "gold_in_shortlist": [],
+ "turns": [
+  {
+   "messages_in": 2,
+   "reply": "",
+   "calls": [
+    {
+     "tool": "select_files",
+     "args": {
+      "paths": [
+       "cache/cache.go",
+       "cache/progress_requestor.go",
+       "cache/demux.go",
+       "cache/watcher.go",
+       "cache/config.go",
+       "cache/ready.go"
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "messages_in": 4,
+   "reply": "I kept the six cache files already selected: `cache.go` (where `RequestProgress` would go), `progress_requestor.go`, `demux.go`, `watcher.go`, `config.go` and `ready.go`. About 920 tokens remain, which is not enough for any other candidate that would add useful context. The closest one, `cache/progress_requestor_test.go`, is about 1,175 tokens and would not fit.",
+   "calls": []
+  }
+ ],
+ "input_tokens": 10451,
+ "output_tokens": 770
+}
