@@ -55,11 +55,15 @@ def score(
     - `line_precision`: share of the lines shown that are needed lines; None when empty.
     - `recall_code`: `recall` with test files left out of the gold; None if gold is tests only.
 
-    `sizes` gives each file's line count, so a whole file counts as all its lines.
+    `sizes` gives each file's line count, so a whole file counts as all its lines. Needed
+    lines past the end of a file that can be read are not counted: no delivery could show them.
     """
     wanted, shown = set(gold), set(delivered)
     hit = len(shown & wanted)
     needed = needed_lines(spans, gold)
+    for path, lines in needed.items():  # some spans run past the end of their file
+        if path in sizes:
+            needed[path] = {n for n in lines if n <= sizes[path]}
     total_needed = sum(len(v) for v in needed.values())
     got = shown_lines = 0
     for path, lines in delivered.items():

@@ -198,6 +198,13 @@ def run_task(task: Task, todo: list[tuple[str, int]], meta: dict) -> list[dict]:
     sizes = {p: len(f.text.split("\n")) for p, f in repo.files.items()}
     rows = []
     for method, budget in todo:
+        kind = method.partition(":")[2]
+        if kind and not gold[kind].files:  # an oracle for a definition this task lacks
+            reason = f"no {kind} gold for this task"
+            rows.append(
+                base | {"method": method, "budget": budget, "status": "skipped", "error": reason}
+            )
+            continue
         started, usage, room = time.time(), Usage(), max(budget - HEAD_TOKENS, 0)
         try:
             delivered, error = RUNNERS[method](repo, task, gold, room, usage), None

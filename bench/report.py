@@ -19,8 +19,13 @@ from .stats import Estimate, estimate, field, leave_one_repo_out, paired
 LINE_METHODS = ("llm-lines", "oracle-lines")
 
 
+FEW_REPOS = 10
+
+
 def _cell(e: Estimate) -> str:
-    return f"{e.mean:.2f} ({e.low:.2f}-{e.high:.2f})"
+    """The mean and interval; marked when too few repositories make the interval unreliable."""
+    mark = "*" if e.repos < FEW_REPOS else ""
+    return f"{e.mean:.2f} ({e.low:.2f}-{e.high:.2f}){mark}"
 
 
 def _defined(rows: list[dict], name: str, gold: str) -> float | None:
@@ -36,7 +41,8 @@ def tables(rows: list[dict], gold: str) -> str:
     order = sorted(cells, key=lambda c: (c[1], c[0]))
     out = [
         f"Gold: {gold}. Means over tasks, 95% intervals resampling repositories; "
-        "'by repo' weights each repository equally.\n",
+        "'by repo' weights each repository equally. * marks an interval from fewer than "
+        f"{FEW_REPOS} repositories, which a cluster bootstrap cannot estimate reliably.\n",
         "| Method | Budget | Tasks | File recall | by repo | Precision | Empty | Tokens |",
         "|---|---|---|---|---|---|---|---|",
     ]

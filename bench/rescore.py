@@ -23,6 +23,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("results", type=Path)
     parser.add_argument("--methods", default="llm")
+    parser.add_argument("--name", help="Name the saved method this, e.g. llm for llm-v2.")
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
     methods = args.methods.split(",")
@@ -32,7 +33,7 @@ def main() -> None:
         if row["method"] in methods and not row.get("error"):
             saved[row["task"]][(row["method"], row["budget"])] = row["paths"]
     for method in methods:
-        name = f"{method}@saved"
+        name = f"{args.name or method}@saved"
 
         def runner(repo, task, gold, room, usage, method=method):
             budget = room + run.HEAD_TOKENS
@@ -43,7 +44,7 @@ def main() -> None:
     meta = run.provenance([]) | {"source": str(args.results)}
     tasks = {t.id: t for t in all_tasks()}
     jobs = [
-        (tasks[task_id], [(f"{m}@saved", b) for m, b in sorted(cells)], meta)
+        (tasks[task_id], [(f"{args.name or m}@saved", b) for m, b in sorted(cells)], meta)
         for task_id, cells in saved.items()
     ]
     with ThreadPoolExecutor(4) as pool:

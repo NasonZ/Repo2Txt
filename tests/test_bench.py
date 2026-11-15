@@ -142,8 +142,12 @@ def test_every_reference_method_stays_within_the_budget(monkeypatch):
 
     rows = bench_run.run_task(_task(), [(m, b) for m in methods for b in (200, 2000)], {})
 
-    assert all(row["status"] == "ok" for row in rows)
-    for row in rows:
+    ran = [row for row in rows if row["status"] == "ok"]
+    assert {row["method"] for row in rows if row not in ran} == {
+        "oracle:explored",
+        "oracle-lines:explored",
+    }
+    for row in ran:
         assert row["tokens"] <= row["budget"] - HEAD_TOKENS
     assert check_rows(rows) == []
 
@@ -231,3 +235,19 @@ def test_paired_difference_of_a_constant_shift_is_exact():
     assert result.low == pytest.approx(0.1) and result.high == pytest.approx(0.1)
     assert result.better == 6 and result.worse == 0
     assert leave_one_repo_out(a, b, lambda r: r["v"]) == pytest.approx((0.1, 0.1))
+
+
+def test_needed_lines_past_the_end_of_a_file_are_not_counted():
+    result = score({"a.py": None}, ["a.py"], [["a.py", 8, 14]], {"a.py": 10})
+
+    assert result["line_recall"] == 1.0
+    assert result["line_precision"] == 3 / 10
+
+
+def test_an_oracle_for_a_missing_definition_is_skipped_not_scored_empty(monkeypatch):
+    repo = _repo()
+    monkeypatch.setattr(bench_run, "repository", lambda task: (repo, set(repo.files)))
+
+    rows = bench_run.run_task(_task(), [("oracle:explored", 2000)], {})
+
+    assert rows[0]["status"] == "skipped"
