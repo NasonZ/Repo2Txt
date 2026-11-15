@@ -310,6 +310,12 @@ def main() -> None:
     parser.add_argument("--tasks", type=int, default=20)
     parser.add_argument("--split", choices=["dev", "test"], default="dev")
     parser.add_argument("--unseal", action="store_true", help="Required to run the test split.")
+    parser.add_argument(
+        "--subset",
+        default="verified",
+        choices=["verified", "fresh"],
+        help="fresh: the full release's tasks outside the verified subset.",
+    )
     parser.add_argument("--methods", default="smallest,bm25,oracle:annotated")
     parser.add_argument("--budgets", default="8k,32k,128k")
     parser.add_argument("--workers", type=int, default=4)
@@ -339,7 +345,7 @@ def main() -> None:
         out.write_text("".join(json.dumps(row) + "\n" for row in rows))
     done = {(row["task"], row["method"], row["budget"]) for row in rows}
     jobs = []
-    for task in sample(args.tasks, args.split):
+    for task in sample(args.tasks, args.split, subset=args.subset):
         todo = [(m, b) for m in methods for b in budgets if (task.id, m, b) not in done]
         if todo:
             jobs.append((task, todo, meta))

@@ -200,27 +200,41 @@ def all_tasks(subset: str = "verified") -> list[Task]:
 
 
 def manifest(subset: str = "verified") -> dict:
-    tasks = all_tasks(subset)
+    tasks = pool(subset)
+    source = "full" if subset == FRESH else subset
     return {
         "dataset": DATASET,
         "revision": REVISION,
         "subset": subset,
-        "file": SUBSETS[subset][0],
-        "sha256": SUBSETS[subset][1],
+        "file": SUBSETS[source][0],
+        "sha256": SUBSETS[source][1],
         "splits": {
             split: sorted(t.id for t in tasks if t.split == split) for split in ("dev", "test")
         },
     }
 
 
-def sample(count: int, split: str = "dev", seed: str = "repo2txt") -> list[Task]:
+FRESH = "fresh"  # the full release's tasks that are not in the verified subset
+
+
+def pool(subset: str = "verified") -> list[Task]:
+    """The tasks of a subset; `fresh` is the full release minus the verified subset."""
+    if subset == FRESH:
+        seen = {t.id for t in all_tasks("verified")}
+        return [t for t in all_tasks("full") if t.id not in seen]
+    return all_tasks(subset)
+
+
+def sample(
+    count: int, split: str = "dev", seed: str = "repo2txt", subset: str = "verified"
+) -> list[Task]:
     """A fixed sample of one split that takes one task from each repository in turn."""
 
     def key(text: str) -> str:
         return hashlib.sha256(f"{seed}:{text}".encode()).hexdigest()
 
     by_repo: dict[str, list[Task]] = defaultdict(list)
-    for task in all_tasks():
+    for task in pool(subset):
         if task.split == split:
             by_repo[task.repo].append(task)
     queues = [
@@ -258,16 +272,22 @@ def repository(task: Task) -> tuple[Repository, set[str]]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Write or check the task manifest.")
-    parser.add_argument("--write", action="store_true", help="Rewrite bench/manifest.json.")
+    parser.add_argument("--write", action="store_true", help="Rewrite the manifest.")
+    parser.add_argument("--subset", default="verified", choices=["verified", FRESH])
     args = parser.parse_args()
-    current = manifest()
+    current = manifest(args.subset)
+    path = (
+        MANIFEST
+        if args.subset == "verified"
+        else MANIFEST.with_name(f"manifest-{args.subset}.json")
+    )
     if args.write:
-        MANIFEST.write_text(json.dumps(current, indent=1) + "\n")
-        print(f"wrote {MANIFEST}")
+        path.write_text(json.dumps(current, indent=1) + "\n")
+        print(f"wrote {path}")
         return
-    recorded = json.loads(MANIFEST.read_text())
+    recorded = json.loads(path.read_text())
     if recorded != current:
-        raise SystemExit("The tasks differ from bench/manifest.json.")
+        raise SystemExit(f"The tasks differ from {path}.")
     counts = {s: len(ids) for s, ids in current["splits"].items()}
     print(f"tasks match the manifest: {counts}")
 
