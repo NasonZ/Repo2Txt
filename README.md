@@ -191,9 +191,10 @@ one issue's result is not. The needed files are one sufficient set, not the only
 precision is probably understated. Whether the models had seen these repositories in
 training was not measured.
 
-[bench/README.md](bench/README.md) describes the harness, its checks and how to reproduce
-every number; [docs/report-2026-11-14.md](docs/report-2026-11-14.md) is the account of the
-earlier tuning.
+[docs/report-2026-11-16.md](docs/report-2026-11-16.md) is the full account: what "needed"
+means, what the harness checks, the outside benchmarks, the models and the limits.
+[bench/README.md](bench/README.md) explains how to reproduce every number, and
+[docs/report-2026-11-14.md](docs/report-2026-11-14.md) is the earlier tuning.
 
 ## How it is put together
 
