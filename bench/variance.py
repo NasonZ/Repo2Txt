@@ -11,17 +11,16 @@ of two methods carries.
 """
 
 import argparse
-import json
 from collections import defaultdict
 from statistics import mean, pstdev, variance
 
+from .io import read_rows
 from .stats import estimate, field
 
 
 def load(path: str, method: str, budget: int) -> list[dict]:
     rows = []
-    for line in open(path):
-        row = json.loads(line)
+    for row in read_rows(path):
         if row["method"].split("@")[0] == method and row["budget"] == budget:
             if row["status"] == "ok":
                 rows.append(row)

@@ -16,6 +16,7 @@ from collections import defaultdict
 
 from repo2txt.api import HEAD_TOKENS
 
+from .io import read_rows
 from .metrics import score
 from .run import MODEL_METHODS, RUNNERS, run_task
 from .tasks import sample
@@ -102,7 +103,7 @@ def main() -> None:
     parser.add_argument("--results", help="Audit this results file instead.")
     args = parser.parse_args()
     if args.results:
-        rows = [json.loads(line) for line in open(args.results)]
+        rows = read_rows(args.results)
         problems = check_rows(rows)
     else:
         problems = check_harness(args.tasks)

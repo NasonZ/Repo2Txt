@@ -16,6 +16,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from . import run
+from .io import read_rows
 from .tasks import all_tasks
 
 
@@ -28,8 +29,7 @@ def main() -> None:
     args = parser.parse_args()
     methods = args.methods.split(",")
     saved: dict[str, dict[tuple[str, int], list[str]]] = defaultdict(dict)
-    for line in args.results.read_text().splitlines():
-        row = json.loads(line)
+    for row in read_rows(args.results):
         if row["method"] in methods and not row.get("error"):
             saved[row["task"]][(row["method"], row["budget"])] = row["paths"]
     for method in methods:

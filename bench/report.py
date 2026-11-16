@@ -9,11 +9,11 @@ it beside whole-file methods on a different footing.
 """
 
 import argparse
-import json
 from collections import defaultdict
 from statistics import mean
 
 from .check import check_rows
+from .io import read_rows
 from .stats import Estimate, estimate, field, leave_one_repo_out, paired
 
 LINE_METHODS = ("llm-lines", "oracle-lines")
@@ -106,7 +106,7 @@ def main() -> None:
     parser.add_argument("--gold", default="annotated", choices=["annotated", "edited", "explored"])
     parser.add_argument("--compare", action="append", default=[], help="A:B, e.g. llm:bm25")
     args = parser.parse_args()
-    rows = [json.loads(line) for line in open(args.results)]
+    rows = read_rows(args.results)
     problems = check_rows(rows)
     for message in problems:
         print("WARNING", message)

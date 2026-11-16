@@ -11,6 +11,7 @@ from each row's ranking, Budgeted Context Yield from `report_bcy_budget_curve`.
 
 import argparse
 import json
+import lzma
 import tempfile
 from pathlib import Path
 
@@ -43,6 +44,15 @@ def main() -> None:
     parser.add_argument("--out-dir", type=Path, default=Path("bench/results/arb/report"))
     parser.add_argument("details", type=Path, nargs="+")
     args = parser.parse_args()
+    unpacked = tempfile.TemporaryDirectory()
+    plain = []
+    for path in args.details:  # the evaluator reads plain files; compressed ones are unpacked
+        if path.suffix == ".xz":
+            target = Path(unpacked.name) / path.name.removesuffix(".xz")
+            target.write_text(lzma.open(path, "rt").read())
+            path = target
+        plain.append(path)
+    args.details = plain
     print("| Ranking | Half | Samples | Recall@5 | Recall@20 | MRR |")
     print("| --- | --- | ---: | ---: | ---: | ---: |")
     for path in args.details:
@@ -63,7 +73,7 @@ def main() -> None:
             corpus_manifest_path=manifest,
             out_path=args.out_dir / "bcy_budget_curve.json",
             markdown_out_path=args.out_dir / "bcy_budget_curve.md",
-            runs=[(p.stem, "repo2txt", p) for p in args.details],
+            runs=[(p.name.removesuffix(".jsonl"), "repo2txt", p) for p in args.details],
         )
     print("\n| Ranking | BCY@4k | BCY@8k | BCY@16k | BCY@32k |")
     print("| --- | ---: | ---: | ---: | ---: |")
