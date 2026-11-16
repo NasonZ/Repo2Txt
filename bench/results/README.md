@@ -1,8 +1,10 @@
 # Results files
 
-Each file holds one row per task, method and budget. `python -m bench.report FILE` prints a
-table. `test.jsonl` is the held-out split (219 tasks, 19 repositories), run once after the methods
-were fixed. The others are from the tuning split (281 tasks, 40 repositories).
+Each file holds one row per task, method and budget. The files at this level come from the
+first harness (14-15 November) and are kept as recorded; `python -m bench.rescore` scores their
+saved selections through the current one. `test.jsonl` is the verified subset's held-out split
+(219 tasks, 19 repositories); the others are from its tuning split (281 tasks, 40
+repositories). The rebuilt harness's files are in `v2/`, `v3/` and `arb/`, described below.
 
 | File | What it holds |
 |---|---|
@@ -36,3 +38,34 @@ Method names in these files, some of which no longer exist in the code:
 | `*-fill` | A model selection topped up from `bm25-cut` | +2 points at 128k for half the precision; removed |
 
 The model was `claude-haiku-5-5` throughout.
+
+## The rebuilt harness (15-16 November)
+
+Rows from here on carry the delivery itself, scores against each definition of what a task
+needs (`scores.annotated`, `scores.edited`, `scores.explored`) and the code, data and model
+they came from (`run`). See bench/README.md.
+
+### `v3/`: the pre-registered run (bench/preregistration-2026-11-15.md)
+
+| File | What it holds |
+|---|---|
+| `fresh-reference.jsonl.xz` | Model-free methods and oracles on the 255 fresh held-out tasks, 8k/32k/128k. |
+| `fresh-llm-haiku.jsonl`, `-sonnet`, `-deepseek` | The model selector with each model, 8k and 32k. |
+| `fresh-lines-haiku.jsonl` | Line ranges with Haiku at 8k. |
+| `arb-llm-haiku.jsonl.xz`, `-sonnet`, `-deepseek` | Agent Retrieval Bench details, one per model; `arb-report/` is its evaluator's output. |
+
+### `v2/`: reference runs, repeats and experiments
+
+| File | What it holds |
+|---|---|
+| `dev-reference.jsonl.xz`, `test-reference.jsonl.xz` | Model-free methods and oracles on the verified subset's two splits. |
+| `test-llm-saved.jsonl`, `dev-llm-saved.jsonl` | The earlier harness's saved model selections, rescored (`bench.rescore`). |
+| `test-llm-run1..3.jsonl` | Three repeat held-out runs at 32k (compatible route, the selector before the prefix change), for `bench.variance`. |
+| `test-repomap.jsonl` | Aider's repo map on the held-out split. |
+| `pilot-*.jsonl` | Each model, natively, on 10 tuning tasks. |
+| `ab-*.jsonl` | Tuning-task experiments at 32k: `current` against `v3` (prompt v3), `state` (selected paths in tool replies), on Haiku, DeepSeek and the compatible route. |
+
+### `arb/`: Agent Retrieval Bench, first runs
+
+`repo2txt-bm25`, `-bm25-plain` and `-llm` (the earlier selector, compatible route), with
+`report/` from the benchmark's evaluator.
