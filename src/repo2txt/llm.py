@@ -22,10 +22,22 @@ class Call:
 
 @dataclass
 class Reply:
+    """A model's turn.
+
+    `input_tokens` counts all input, cached or not; `cached_tokens` and `cache_write_tokens`
+    are the parts of it read from and written to a prompt cache, where the endpoint says.
+    `message`, when set, is the turn as the endpoint wants it back in the history, carrying
+    whatever reasoning state it must see again; otherwise the history is rebuilt from `text`
+    and `calls`.
+    """
+
     text: str
     calls: list[Call] = field(default_factory=list)
     input_tokens: int = 0
     output_tokens: int = 0
+    cached_tokens: int = 0
+    cache_write_tokens: int = 0
+    message: Any = None
 
 
 Complete = Callable[[list[dict[str, Any]], list[dict[str, Any]]], Reply]
@@ -40,10 +52,11 @@ class LLMSettings:
     model: str
     api_key: str
     base_url: str | None = None
+    temperature: float | None = None  # None leaves the endpoint's default
 
     @classmethod
     def from_env(cls) -> "LLMSettings":
-        """Read LLM_MODEL, LLM_BASE_URL and LLM_API_KEY.
+        """Read LLM_MODEL, LLM_BASE_URL, LLM_API_KEY and, optionally, LLM_TEMPERATURE.
 
         A model is always required. A key is required unless a base URL is set, since local
         servers usually ignore it.
@@ -59,7 +72,12 @@ class LLMSettings:
                     "LLM_API_KEY is not set. Set it, or set LLM_BASE_URL for a local server."
                 )
             api_key = "unused"
-        return cls(model, api_key, base_url)
+        temperature = os.getenv("LLM_TEMPERATURE")
+        try:
+            value = float(temperature) if temperature else None
+        except ValueError as exc:
+            raise ConfigError(f"LLM_TEMPERATURE must be a number, not {temperature!r}.") from exc
+        return cls(model, api_key, base_url, value)
 
 
 def openai_complete(settings: LLMSettings) -> Complete:
@@ -75,6 +93,8 @@ def openai_complete(settings: LLMSettings) -> Complete:
 
     def complete(messages: list[dict[str, Any]], tools: list[dict[str, Any]]) -> Reply:
         extra = {"tools": tools, "tool_choice": "auto"} if tools else {}
+        if settings.temperature is not None:
+            extra["temperature"] = settings.temperature
         response = client.chat.completions.create(model=settings.model, messages=messages, **extra)
         message = response.choices[0].message
         calls = []

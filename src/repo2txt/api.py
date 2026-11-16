@@ -335,9 +335,7 @@ def select_lines(
     shown: dict[str, set[int] | None] = {}
 
     def cost(path: str, lines: set[int] | None) -> int:
-        if lines is None:
-            return repo.files[path].cost
-        return sum(c for _, c in _intervals(repo, path, lines))
+        return delivery_cost(repo, path, lines)
 
     used = 0
     for path, first, last in ranges:
@@ -354,11 +352,18 @@ def select_lines(
 
     items: list[tuple[str, int]] = []
     for path, lines in shown.items():
-        items += [(path, repo.files[path].cost)] if lines is None else _intervals(repo, path, lines)
+        items += [(path, repo.files[path].cost)] if lines is None else line_items(repo, path, lines)
     return items
 
 
-def _intervals(repo: Repository, path: str, lines: set[int]) -> list[tuple[str, int]]:
+def delivery_cost(repo: Repository, path: str, lines: set[int] | None) -> int:
+    """What packing a file costs: whole when `lines` is None, otherwise those lines' ranges."""
+    if lines is None:
+        return repo.files[path].cost
+    return sum(cost for _, cost in line_items(repo, path, lines))
+
+
+def line_items(repo: Repository, path: str, lines: set[int]) -> list[tuple[str, int]]:
     """Contiguous runs of `lines` as `path:first-last` items, with what each costs to pack."""
     text = repo.files[path].text.split("\n")
     runs: list[list[int]] = []

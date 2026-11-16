@@ -41,7 +41,7 @@ selection that uses a small part of the budget has usually left something out, s
 use most of it, and keep going after the first plausible files.
 
 Budget: {budget:,} tokens. A change that would exceed it is refused and leaves the selection \
-as it was. Selected so far: {selected}
+as it was. Each tool reply ends with what is selected and how much of the budget is left.
 
 You have {rounds} rounds of tool calls. Calls that do not depend on each other can go in \
 the same round. Give paths exactly as they appear, most important first. When the selection \
@@ -93,9 +93,12 @@ class Selector:
         self.complete = complete
         self.selection = Selection(repo, budget)
         self.messages: list[dict[str, Any]] = []
-        self.input_tokens = 0
-        self.output_tokens = 0
-        self._tree = map_text(repo_map(repo, max_tokens=TREE_TOKENS), TREE_TOKENS)
+        self.input_tokens = self.output_tokens = 0
+        self.cached_tokens = self.cache_write_tokens = self.calls = 0
+        tree_text = map_text(repo_map(repo, max_tokens=TREE_TOKENS), TREE_TOKENS)
+        self._system = SYSTEM.format(
+            name=repo.name, budget=budget, tree=tree_text, rounds=MAX_ROUNDS
+        )
         self._handlers: dict[str, Callable[..., str]] = {
             "select_files": lambda paths: self._report(self.selection.replace(_paths(paths))),
             "adjust_selection": lambda add=(), remove=(): self._report(
@@ -112,36 +115,34 @@ class Selector:
             rows = "\n".join(f"{p} {self.repo.files[p].tokens:,}" for p in leads)
             request = CANDIDATES.format(rows=rows, request=request)
         self.messages.append({"role": "user", "content": request})
-        for round_number in range(MAX_ROUNDS + 1):
-            # After the last round the model must answer in words.
-            tools = TOOLS if round_number < MAX_ROUNDS else []
-            reply = self.complete(self._conversation(), tools)
+        # The system prompt and the tools stay the same every round, and the history only grows,
+        # so each round's request begins with the previous one: a prompt cache can reuse it, and
+        # reasoning carried in earlier turns stays valid.
+        for _ in range(MAX_ROUNDS):
+            reply = self.complete(self._conversation(), TOOLS)
             self.input_tokens += reply.input_tokens
             self.output_tokens += reply.output_tokens
-            self.messages.append(_assistant(reply.text, reply.calls))
+            self.cached_tokens += reply.cached_tokens
+            self.cache_write_tokens += reply.cache_write_tokens
+            self.calls += 1
+            message = reply.message
+            self.messages.append(
+                message if message is not None else _assistant(reply.text, reply.calls)
+            )
             if not reply.calls:
                 return reply.text
             for call in reply.calls:
                 self.messages.append(
                     {"role": "tool", "tool_call_id": call.id, "content": self._run(call)}
                 )
-        return reply.text
+        selection = self.selection
+        return (
+            reply.text
+            or f"Used all {MAX_ROUNDS} rounds; the selection holds {len(selection.paths)} files."
+        )
 
     def _conversation(self) -> list[dict[str, Any]]:
-        selection = self.selection
-        selected = "nothing"
-        if selection.paths:
-            selected = f"{len(selection.paths)} files, {selection.total:,} tokens: " + ", ".join(
-                selection.paths
-            )
-        system = SYSTEM.format(
-            name=self.repo.name,
-            budget=selection.budget,
-            selected=selected,
-            tree=self._tree,
-            rounds=MAX_ROUNDS,
-        )
-        return [{"role": "system", "content": system}, *self.messages]
+        return [{"role": "system", "content": self._system}, *self.messages]
 
     def _run(self, call: Call) -> str:
         """Run one tool call. Whatever goes wrong, the model gets a reply it can act on."""
@@ -154,11 +155,17 @@ class Selector:
             result = handler(**call.arguments)
         except (TypeError, ValueError) as exc:
             return f"Bad arguments for {call.name}: {exc}. Nothing was changed."
-        # Every reply says where the budget stands, so the model can see what room is left.
+        # Every reply ends with the selection and the budget, so the model sees what it has
+        # chosen where it reads next. (Restating it in the system prompt instead would change
+        # the start of every request, which no prompt cache can reuse.)
         selection = self.selection
         left = selection.budget - selection.total
         used = f"{len(selection.paths)} files, {selection.total:,} of {selection.budget:,} tokens"
-        return f"{result}\n[Selected: {used}; {left:,} left]"
+        listed = ", ".join(selection.paths) if selection.paths else "nothing"
+        return (
+            f"{result}\n[Selected: {used}; {left:,} left]"
+            f"\n[Selection, most important first: {listed}]"
+        )
 
     def _report(self, change: Change) -> str:
         """Tell the model what its change did, in terms it can act on."""

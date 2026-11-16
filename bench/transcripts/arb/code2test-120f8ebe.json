@@ -1,0 +1,72 @@
+{
+ "sample": "120f8ebe03b4feba2ac74c51",
+ "task_type": "code2test",
+ "repo": "etcd-io/etcd",
+ "query": "changed_file_summary:\n1 implementation files and 1 existing test files changed within 2 total files.\n\nimplementation_file_count:\n1\n\nimplementation_files:\n[\"server/etcdmain/grpc_proxy.go\"]\n\npr_body:\nThis adds the min and max TLS version support from #13506 and #15156 to the grpc proxy.\n\nFixes #13506\n\n\nPlease read https://github.com/etcd-io/etcd/blob/main/CONTRIBUTING.md#contribution-flow.\n\npr_title:\nadd tls min/max version to grpc proxy",
+ "gold": [
+  "tests/e2e/etcd_grpcproxy_test.go"
+ ],
+ "selected": [
+  "server/etcdmain/grpc_proxy.go",
+  "client/pkg/transport/tls.go",
+  "server/etcdmain/config.go",
+  "server/etcdmain/etcd.go"
+ ],
+ "gold_in_shortlist": [],
+ "turns": [
+  {
+   "messages_in": 2,
+   "reply": "",
+   "calls": [
+    {
+     "tool": "list_dir",
+     "args": {
+      "path": "server/etcdmain"
+     }
+    },
+    {
+     "tool": "list_dir",
+     "args": {
+      "path": "client/pkg"
+     }
+    }
+   ]
+  },
+  {
+   "messages_in": 5,
+   "reply": "",
+   "calls": [
+    {
+     "tool": "list_dir",
+     "args": {
+      "path": "client/pkg/transport"
+     }
+    }
+   ]
+  },
+  {
+   "messages_in": 7,
+   "reply": "",
+   "calls": [
+    {
+     "tool": "select_files",
+     "args": {
+      "paths": [
+       "server/etcdmain/grpc_proxy.go",
+       "client/pkg/transport/tls.go",
+       "server/etcdmain/config.go",
+       "server/etcdmain/etcd.go"
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "messages_in": 9,
+   "reply": "I kept the four files already selected: `server/etcdmain/grpc_proxy.go` is the implementation the request names, and `tls.go`, `config.go` and `etcd.go` supply the TLS config and min/max version handling it relies on. I did not add a test file because the closest one, `config_test.go` (about 2,435 tokens), is larger than the 1,021 tokens left.",
+   "calls": []
+  }
+ ],
+ "input_tokens": 22337,
+ "output_tokens": 1458
+}

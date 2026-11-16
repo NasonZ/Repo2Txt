@@ -1,5 +1,7 @@
 """The selector's loop, driven by scripted model replies."""
 
+import json
+
 from repo2txt.llm import Call, Reply
 from repo2txt.models import RepoFile, Repository
 from repo2txt.selection import Selection
@@ -58,10 +60,12 @@ def test_a_selection_never_exceeds_the_budget_even_if_the_model_insists():
     script = Script(*[("select_files", {"paths": ["a.py", "b.py"]})] * 5, "I give up.")
 
     selector = Selector(repo, 100, script)
-    selector.ask("everything")
+    reply = selector.ask("everything")
 
     assert selector.selection.paths == []
-    assert script.replies == []  # the sixth request offered no tools, so the model had to answer
+    # Five rounds, every one with the same tools; then the loop stops without a sixth request.
+    assert script.replies == ["I give up."]
+    assert "Used all 5 rounds" in reply
 
 
 def test_a_collapsed_directory_can_be_listed_and_selected_from():
@@ -120,8 +124,9 @@ def test_bad_tool_arguments_change_nothing_and_always_get_a_reply():
 
     assert selector.selection.paths == ["a.py"]
     calls = [m for m in selector.messages if m["role"] == "assistant" and m.get("tool_calls")]
-    assert len(results(script)) == len(calls) == 5
-    assert all("Nothing was changed" in text or "no tool" in text for text in results(script)[1:])
+    replies = [m["content"] for m in selector.messages if m["role"] == "tool"]
+    assert len(replies) == len(calls) == 5
+    assert all("Nothing was changed" in text or "no tool" in text for text in replies[1:])
 
 
 def test_line_ranges_come_first_and_the_rest_of_the_budget_takes_whole_files(repo):
@@ -144,3 +149,49 @@ def test_line_ranges_come_first_and_the_rest_of_the_budget_takes_whole_files(rep
     assert sum(cost for _, cost in items) <= 1500
     packed = repo_pack(repo, [item for item, _ in items], 1500 + 60)
     assert not packed.omitted
+
+
+def test_every_round_begins_with_the_previous_request_so_a_cache_can_reuse_it():
+    repo = repository({"a.py": 10, "b.py": 10})
+    seen = []
+
+    def complete(messages, tools):
+        seen.append((json.dumps(messages), json.dumps(tools)))
+        if len(seen) == 1:
+            return Reply("", [Call("c1", "select_files", {"paths": ["a.py"]})])
+        if len(seen) == 2:
+            return Reply("", [Call("c2", "adjust_selection", {"add": ["b.py"]})])
+        return Reply("Done.")
+
+    Selector(repo, 100, complete).ask("a and b")
+
+    for (before, tools_before), (after, tools_after) in zip(seen, seen[1:], strict=False):
+        assert after.startswith(before[:-1])  # the earlier messages, unchanged, then more
+        assert tools_after == tools_before
+
+
+def test_a_reply_that_carries_its_own_message_is_kept_as_it_is():
+    repo = repository({"a.py": 10})
+    marker = {
+        "role": "assistant",
+        "content": "",
+        "reasoning_state": {"x": 1},
+        "tool_calls": [
+            {
+                "id": "c1",
+                "type": "function",
+                "function": {"name": "select_files", "arguments": '{"paths": ["a.py"]}'},
+            }
+        ],
+    }
+    replies = iter(
+        [
+            Reply("", [Call("c1", "select_files", {"paths": ["a.py"]})], message=marker),
+            Reply("Done."),
+        ]
+    )
+    selector = Selector(repo, 100, lambda messages, tools: next(replies))
+
+    selector.ask("a")
+
+    assert marker in selector.messages

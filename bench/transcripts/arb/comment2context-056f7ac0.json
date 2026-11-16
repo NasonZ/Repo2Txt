@@ -1,0 +1,55 @@
+{
+ "sample": "056f7ac0b2a4940bc1ad5342",
+ "task_type": "comment2context",
+ "repo": "vitejs/vite",
+ "query": "diff_hunk_context:\n@@ -22,6 +22,7 @@ function App() {\n           </p>\n         </div>\n         <button\n\ngiven_file:\npackages/create-vite/template-react-ts/src/App.tsx\n\nline:\n25\n\npath:\npackages/create-vite/template-react-ts/src/App.tsx\n\npr_title:\nfix(create-vite): use `type=\"button\"` to counter button in templates consistently\n\nreview_comment:\nWould you add this to other templates that are missing as well?",
+ "gold": [
+  "packages/create-vite/template-lit-ts/src/my-element.ts",
+  "packages/create-vite/template-lit/src/my-element.js"
+ ],
+ "selected": [
+  "packages/create-vite/template-react-ts/src/App.tsx",
+  "packages/create-vite/template-solid-ts/src/App.tsx",
+  "packages/create-vite/template-preact-ts/src/app.tsx",
+  "packages/create-vite/template-qwik-ts/src/app.tsx",
+  "packages/create-vite/template-svelte-ts/src/App.svelte",
+  "packages/create-vite/template-react/src/App.jsx",
+  "packages/create-vite/template-solid/src/App.jsx",
+  "packages/create-vite/template-preact/src/app.jsx",
+  "packages/create-vite/template-qwik/src/app.jsx"
+ ],
+ "gold_in_shortlist": [
+  "packages/create-vite/template-lit-ts/src/my-element.ts"
+ ],
+ "turns": [
+  {
+   "messages_in": 2,
+   "reply": "",
+   "calls": [
+    {
+     "tool": "select_files",
+     "args": {
+      "paths": [
+       "packages/create-vite/template-react-ts/src/App.tsx",
+       "packages/create-vite/template-solid-ts/src/App.tsx",
+       "packages/create-vite/template-preact-ts/src/app.tsx",
+       "packages/create-vite/template-qwik-ts/src/app.tsx",
+       "packages/create-vite/template-svelte-ts/src/App.svelte",
+       "packages/create-vite/template-react/src/App.jsx",
+       "packages/create-vite/template-solid/src/App.jsx",
+       "packages/create-vite/template-preact/src/app.jsx",
+       "packages/create-vite/template-qwik/src/app.jsx"
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "messages_in": 4,
+   "reply": "The selection is unchanged at the nine files I already had, which cover the React TypeScript template where the `<button>` lacks `type=\"button\"` plus the other framework templates (Solid, Preact, Qwik, Svelte, and JS variants) that the review comment asks about. I did not add the Vue, Lit, or vanilla templates, since the remaining budget of 496 tokens is too small to fit them reliably.",
+   "calls": []
+  }
+ ],
+ "input_tokens": 9076,
+ "output_tokens": 1100
+}

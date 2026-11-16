@@ -139,46 +139,64 @@ goes to its chosen files whole. The output is `path:first-last` items, so
 
 ## How well it selects
 
-Measured on [ContextBench](https://huggingface.co/datasets/Contextbench/ContextBench) tasks:
-real issues, each with the files a person judged necessary to resolve it. A method is given
-the issue text and the repository at that commit. Recall is the share of the needed files it
-fitted into the budget; precision is the share of what it chose that was needed.
+Measured on [ContextBench](https://huggingface.co/datasets/Contextbench/ContextBench): real
+issues from open-source repositories, each with the code a person traced out from the fix
+and checked was enough to write one. A method is given the issue text and the repository at
+that commit. Recall is the share of the needed files it delivered within the budget;
+precision, in brackets, the share of what it delivered that was needed.
 
-The methods were tuned on 281 issues from 40 repositories. The table is from 219 further
-issues from 19 other repositories, held out until the methods were fixed and then run once.
+The methods were tuned on other tasks. These 254 issues from 21 repositories were run once,
+after the configuration was frozen and the tests written down
+([pre-registration](bench/preregistration-2026-11-15.md)).
 
 | Method | 8k tokens | 32k tokens | 128k tokens |
 |---|---|---|---|
-| Smallest files first | 0.01 | 0.02 | 0.08 |
-| BM25 alone | 0.15 (0.07) | 0.34 (0.08) | 0.51 (0.06) |
-| `select` (BM25 with three added signals) | 0.25 (0.11) | 0.55 (0.12) | 0.67 (0.07) |
-| `select --method llm` (claude-haiku-5-5) | 0.47 (0.39) | 0.75 (0.35) | 0.81 (0.25) |
-| The needed files themselves | 0.62 | 0.93 | 0.99 |
+| Smallest files first | 0.01 | 0.04 | 0.12 |
+| BM25 alone | 0.09 (0.08) | 0.24 (0.10) | 0.44 (0.07) |
+| `select` (BM25 with three added signals) | 0.19 (0.12) | 0.40 (0.14) | 0.56 (0.09) |
+| `select --method llm`, Claude Haiku 5.5 | 0.34 (0.42) | **0.59** (0.41) | 0.68 (0.32)\* |
+| `select --method llm`, Claude Sonnet 5.5 | 0.33 (0.56) | 0.55 (0.58) | |
+| `select --method llm`, DeepSeek flash | 0.35 (0.35) | 0.60 (0.27) | |
+| The needed files themselves | 0.61 | 0.89 | 0.99 |
 
-Recall, with precision in brackets. Compared issue by issue, the model selector's lead over
-`select` is +0.22 at 8k (95% interval 0.13 to 0.28), +0.20 at 32k (0.15 to 0.25) and +0.15
-at 128k (0.08 to 0.21), with intervals from resampling whole repositories.
+\* Run after the pre-registered runs, to complete the curve.
 
-What the numbers say. The lexical default finds about half the needed files at 32k and fills
-the budget doing it: almost nine files in ten that it returns are not needed. A small model
-choosing from the tree and the lexical shortlist finds three quarters, and a third of its
-choices are needed. The last row is the ceiling for whole files: at 8k even a perfect choice
-reaches 0.62, because the needed files often do not fit whole.
+Compared issue by issue at 32k, with 95% intervals from resampling whole repositories, the
+model selector beats `select` by 0.19 with Haiku (0.14 to 0.24), 0.15 with Sonnet (0.11 to
+0.20) and 0.20 with DeepSeek (0.15 to 0.24); `select` beats BM25 alone by 0.16 (0.10 to
+0.22). All four were the tests written down beforehand, and all four held. The order of
+methods is the same when "needed" means the files the fix edited, and where SWE-Explore says
+which lines successful agents read.
 
-**Line ranges at small budgets.** `select --method llm --lines` lets the model pick line
-ranges from outlines of the files it chose, then fills the rest of the budget with whole
-files. At 8k it raises the share of needed lines delivered from 0.52 to 0.67 (+0.15, 0.08
-to 0.22; better on 88 issues, worse on 14), and file recall from 0.47 to 0.70. Its output is
-`path:first-last` items, which `pack --stdin` reads.
+**Which model.** Haiku matches DeepSeek and beats Sonnet on recall, at a sixth and a
+fourteenth of their cost: 255 selections at 32k cost $0.47, $3.00 and $6.72. Sonnet picks
+fewer files, more of them needed, and misses more; DeepSeek takes about four rounds of tool
+calls where Haiku takes under three, and six times as long. For this step a larger model did
+not help.
 
-The model rows cost about 20 million input and 1 million output tokens for the held-out
-run. The needed files are one sufficient set; other files could serve as well, so precision is probably understated. Whether the
-model had seen these repositories and fixes in training was not measured, and each
-configuration was run once. [The web piece](docs/index.html) shows the results with an
-issue-by-issue browser and a selector transcript;
-[docs/report-2026-11-14.md](docs/report-2026-11-14.md) is the full account of each
-experiment, what was tried and dropped, and the limits. `python -m bench.run` reproduces the
-rows.
+**Line ranges.** At 8k the needed files often do not fit whole. `select --method llm --lines`
+has the model pick line ranges from outlines of the files it chose; it raises the share of
+needed lines delivered from 0.38 to 0.48 (0.04 to 0.17 better), against a ceiling of 0.92 for
+the lines alone.
+
+**On another benchmark.** [Agent Retrieval Bench](https://arxiv.org/abs/2607.24882) asks for
+the files a coding agent needs next, from a failing trace, a review comment or a pull
+request. Scored by its own evaluator, the model selector's 8k selection reaches a Budgeted
+Context Yield of 0.63 with Haiku, against 0.38 for the benchmark's repo map, 0.37 for its best
+embedding model and 0.53 for the best community result. The lexical default does not transfer
+as well (0.27): one of its signals ranks tests last, which is wrong when the task is to find
+tests.
+
+**How sure.** Four repeat runs of the model selector moved its mean recall by 0.003, so a
+single run is enough for the averages; a quarter of single issues change between runs, so
+one issue's result is not. The needed files are one sufficient set, not the only one, so
+precision is probably understated. Whether the models had seen these repositories in
+training was not measured.
+
+[docs/report-2026-11-16.md](docs/report-2026-11-16.md) is the full account: what "needed"
+means, what the harness checks, the outside benchmarks, the models and the limits.
+[bench/README.md](bench/README.md) explains how to reproduce every number, and
+[docs/report-2026-11-14.md](docs/report-2026-11-14.md) is the earlier tuning.
 
 ## How it is put together
 

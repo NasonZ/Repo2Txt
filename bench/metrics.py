@@ -1,4 +1,9 @@
-"""Scoring a selection against the files a task needs."""
+"""Scoring what a method delivered against what a task needs.
+
+A delivery maps each path shown to the lines shown from it, or to None for the whole file.
+Gold is a list of spans, [file, first, last]; overlapping spans are merged before scoring,
+so a line counts once however many spans name it.
+"""
 
 import re
 from dataclasses import dataclass
@@ -7,9 +12,7 @@ TEST_PATH = re.compile(
     r"(^|/)(tests?|testing|spec|__tests__)/|(^|/)test_|_test\.|\.test\.|\.spec\."
 )
 
-
-def _lines(spans: list[list], files: set[str]) -> int:
-    return sum(last - first + 1 for file, first, last in spans if file in files)
+Delivery = dict[str, set[int] | None]
 
 
 @dataclass
@@ -30,26 +33,50 @@ def resolve(gold: list[str], in_archive: set[str], readable: set[str]) -> Gold:
     )
 
 
-def score(selected: list[str], gold: list[str], spans: list[list]) -> dict[str, float]:
-    """File-level recall, precision and F1 of `selected` against `gold`.
+def needed_lines(spans: list[list], files: list[str]) -> dict[str, set[int]]:
+    """The needed lines of each gold file, with overlapping spans merged."""
+    keep, out = set(files), {}
+    for file, first, last in spans:
+        if file in keep:
+            out.setdefault(file, set()).update(range(first, last + 1))
+    return out
 
-    `line_recall` is the share of the needed lines that were delivered: a file counts for as
-    many lines as were marked in it, so missing the file that holds most of the answer costs
-    more than missing one that holds a line.
 
-    `recall_code` leaves test files out of the gold, since a method told to skip tests should
-    not be marked down for it. It is None when the gold is tests only.
+def score(
+    delivered: Delivery, gold: list[str], spans: list[list], sizes: dict[str, int]
+) -> dict[str, float | None]:
+    """File and line recall and precision of a delivery.
+
+    - `recall`: share of gold files of which anything was shown.
+    - `all_gold`: 1 if every gold file was shown, else 0.
+    - `line_recall`: share of the needed lines shown, a line counted once.
+    - `precision`: share of the files shown that are gold; None when nothing was shown,
+      since an empty answer has no precision and averaging it as 0 would mislead.
+    - `line_precision`: share of the lines shown that are needed lines; None when empty.
+    - `recall_code`: `recall` with test files left out of the gold; None if gold is tests only.
+
+    `sizes` gives each file's line count, so a whole file counts as all its lines. Needed
+    lines past the end of a file that can be read are not counted: no delivery could show them.
     """
-    chosen, wanted = set(selected), set(gold)
-    hit = len(chosen & wanted)
-    recall = hit / len(wanted)
-    precision = hit / len(chosen) if chosen else 0.0
+    wanted, shown = set(gold), set(delivered)
+    hit = len(shown & wanted)
+    needed = needed_lines(spans, gold)
+    for path, lines in needed.items():  # some spans run past the end of their file
+        if path in sizes:
+            needed[path] = {n for n in lines if n <= sizes[path]}
+    total_needed = sum(len(v) for v in needed.values())
+    got = shown_lines = 0
+    for path, lines in delivered.items():
+        size = sizes.get(path, 0)
+        shown_lines += size if lines is None else len(lines)
+        if path in needed:
+            got += len(needed[path]) if lines is None else len(needed[path] & lines)
     code = {p for p in wanted if not TEST_PATH.search(p)}
     return {
-        "recall": recall,
-        "precision": precision,
-        "f1": 2 * recall * precision / (recall + precision) if hit else 0.0,
-        "all_gold": float(wanted <= chosen),
-        "recall_code": len(chosen & code) / len(code) if code else None,
-        "line_recall": _lines(spans, chosen & wanted) / (_lines(spans, wanted) or 1),
+        "recall": hit / len(wanted) if wanted else None,
+        "all_gold": float(wanted <= shown) if wanted else None,
+        "precision": hit / len(shown) if shown else None,
+        "line_recall": got / total_needed if total_needed else None,
+        "line_precision": got / shown_lines if shown_lines else None,
+        "recall_code": len(shown & code) / len(code) if code else None,
     }
