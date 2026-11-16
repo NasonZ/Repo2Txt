@@ -154,10 +154,12 @@ after the configuration was frozen and the tests written down
 | Smallest files first | 0.01 | 0.04 | 0.12 |
 | BM25 alone | 0.09 (0.08) | 0.24 (0.10) | 0.44 (0.07) |
 | `select` (BM25 with three added signals) | 0.19 (0.12) | 0.40 (0.14) | 0.56 (0.09) |
-| `select --method llm`, Claude Haiku 5.5 | 0.34 (0.42) | **0.59** (0.41) | |
+| `select --method llm`, Claude Haiku 5.5 | 0.34 (0.42) | **0.59** (0.41) | 0.68 (0.32)\* |
 | `select --method llm`, Claude Sonnet 5.5 | 0.33 (0.56) | 0.55 (0.58) | |
 | `select --method llm`, DeepSeek flash | 0.35 (0.35) | 0.60 (0.27) | |
 | The needed files themselves | 0.61 | 0.89 | 0.99 |
+
+\* Run after the pre-registered runs, to complete the curve.
 
 Compared issue by issue at 32k, with 95% intervals from resampling whole repositories, the
 model selector beats `select` by 0.19 with Haiku (0.14 to 0.24), 0.15 with Sonnet (0.11 to

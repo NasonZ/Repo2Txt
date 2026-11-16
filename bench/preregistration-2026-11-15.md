@@ -76,3 +76,6 @@ one run per configuration is taken as adequate for means; single-task results ar
   cli/cli) failed to download once during the reference run; the runner marked those tasks
   skipped, which a resumed run does not retry. They are now errors, which it does; the
   affected rows are removed and the run resumed. No result changes from this, only coverage.
+- **An addition after the runs.** Haiku at 128,000 tokens was run afterwards
+  (`v3/fresh-llm-haiku-128k.jsonl`) to complete the web page's curve. It is not one of the
+  pre-registered tests and is marked wherever it appears.

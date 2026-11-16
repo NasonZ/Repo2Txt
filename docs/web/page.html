@@ -160,6 +160,7 @@ footer { margin-top: 72px; padding-top: 18px; border-top: 1px solid var(--rule);
   .strip-note { grid-column: 1; }
   .sheet { padding: 16px 14px 14px; }
 }
+@media (max-width: 640px) { .opt { display: none; } #models-table table { font-size: 13px; } #models-table td, #models-table th { padding: 8px 5px; } }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
 
@@ -167,9 +168,9 @@ footer { margin-top: 72px; padding-top: 18px; border-top: 1px solid var(--rule);
 <header class="col">
   <div class="kicker">Repo2Txt · lab notes · November 2026</div>
   <h1>What reaches the model</h1>
-  <p class="dek">A coding agent works only from what fits in its context. Repo2Txt chooses which parts of a repository go in. Given 32,000 tokens, its default, a lexical ranker, delivers <span data-bind="curve.bm25.32000.recall" data-fmt="pct"></span> of the files a fix needs. A small model, told why completeness matters, delivers <span data-bind="curve.llm.32000.recall" data-fmt="pct"></span>. Measured on <span data-bind="tasks"></span> real issues from <span data-bind="repos"></span> repositories the methods never saw.</p>
-  <div class="byline"><span>Nason</span><span>14–15 November 2026</span><span><a href="https://github.com/NasonZ/Repo2Txt">Code and data</a></span><span><a href="https://github.com/NasonZ/Repo2Txt/blob/main/docs/report-2026-11-14.md">Full report</a></span></div>
-  <nav class="toc" aria-label="Contents"><a href="#measured">What is measured</a><a href="#lexical">Lexical ranking</a><a href="#model">The model selector</a><a href="#tools">The tool that looked useless</a><a href="#lines-not-files">Lines, not files</a><a href="#every">Every issue</a><a href="#overturn">What could overturn this</a><a href="#conclusion">Conclusion</a></nav>
+  <p class="dek">A coding agent works only from what fits in its context. Repo2Txt chooses which parts of a repository go in. Given 32,000 tokens, its default, a lexical ranker, delivers <span data-bind="curve.bm25.32000.recall" data-fmt="pct"></span> of the files a fix needs; Anthropic's smallest model, told why completeness matters, delivers <span data-bind="curve.llm.32000.recall" data-fmt="pct"></span>. Tested on <span data-bind="tasks"></span> issues from <span data-bind="repos"></span> repositories that nothing had been run or tuned on, with the tests written down first.</p>
+  <div class="byline"><span>Nason</span><span>14–16 November 2026</span><span><a href="https://github.com/NasonZ/Repo2Txt">Code and data</a></span><span><a href="https://github.com/NasonZ/Repo2Txt/blob/main/docs/report-2026-11-16.md">Full report</a></span><span><a href="https://github.com/NasonZ/Repo2Txt/blob/main/bench/preregistration-2026-11-15.md">Pre-registration</a></span></div>
+  <nav class="toc" aria-label="Contents"><a href="#measured">What is measured</a><a href="#models">Which model</a><a href="#elsewhere">On another benchmark</a><a href="#lexical">Lexical ranking</a><a href="#model">The model selector</a><a href="#tools">The tool that looked useless</a><a href="#lines-not-files">Lines, not files</a><a href="#every">Every issue</a><a href="#overturn">What could overturn this</a><a href="#conclusion">Conclusion</a></nav>
 </header>
 
 <figure class="wide" id="hero">
@@ -189,10 +190,11 @@ footer { margin-top: 72px; padding-top: 18px; border-top: 1px solid var(--rule);
 <section class="col">
   <h2 style="margin-top:40px">Findings</h2>
   <ul class="findings" id="findings">
-    <li><span><b>The default ranker fills the budget with the wrong files.</b> At 32,000 tokens the lexical ranker delivers <span class="num" data-bind="curve.bm25.32000.recall"></span> of the files a fix needed, and only <span class="num" data-bind="curve.bm25.32000.precision" data-fmt="pct"></span> of the files it delivers were needed.</span></li>
-    <li><span><b>A small model does better once it is told why completeness matters.</b> Claude Haiku 5.5, Anthropic's smallest current model, shown the directory tree and the ranker's top 30 files, delivers <span class="num" data-bind="curve.llm.32000.recall"></span> at 32,000 tokens and <span class="num" data-bind="curve.llm.128000.recall"></span> at 128,000.</span></li>
-    <li><span><b>At 8,000 tokens, whole files waste the budget.</b> The lines a fix needed total about 2,000 tokens. Letting the model pick line ranges at 8,000 tokens raises the share of needed lines delivered from <span class="num" data-bind="curve.llm.8000.line"></span> to <span class="num" data-bind="curve.llm-lines.8000.line"></span>, more than even a perfect choice of whole files reaches (<span class="num" data-bind="curve.oracle.8000.line"></span>).</span></li>
-    <li><span><b>Nothing else tried raised recall by more than a point.</b> Padding with ranked files added about one point, too little for the tokens it cost; merging several runs added nothing; a score cut-off and the first search tools lowered it. All were removed. The search tools first looked harmful; reading the transcripts showed a bug in how they were wired up.</span></li>
+    <li><span><b>A small model beats the lexical default, on work it had never seen.</b> At 32,000 tokens the model selector delivers <span class="num" data-bind="curve.llm.32000.recall"></span> of the needed files against <span class="num" data-bind="curve.bm25.32000.recall"></span> for the default, <span class="num" data-bind="pairs.llm-bm25@32000.better"></span> issues better and <span class="num" data-bind="pairs.llm-bm25@32000.worse"></span> worse. The test was written down before the run, and held for all three models tried.</span></li>
+    <li><span><b>The smallest model is the right one.</b> Claude Haiku 5.5 matches DeepSeek and beats Claude Sonnet 5.5 on recall, at a sixth and a fourteenth of their cost. Sonnet picks fewer files, more of them needed, and misses more.</span></li>
+    <li><span><b>It transfers to a benchmark built differently.</b> On Agent Retrieval Bench, scored by its own evaluator, the model selector's 8k selection reaches a budgeted yield of <span class="num" data-bind="arb.llm.bcy8k"></span>, against 0.38 for the benchmark's repo map and 0.53 for the best community result.</span></li>
+    <li><span><b>What counts as “needed” moves the numbers, not the order.</b> Three definitions disagree by up to half; every method's score changes with them, and their ranking does not.</span></li>
+    <li><span><b>At 8,000 tokens, choose lines.</b> Picking line ranges from outlines raises the share of needed lines delivered from <span class="num" data-bind="curve.llm.8000.line"></span> to <span class="num" data-bind="curve.llm-lines.8000.line"></span>; the lines alone would reach <span class="num" data-bind="curve.oracle-lines.8000.line"></span>.</span></li>
   </ul>
 </section>
 
@@ -200,7 +202,8 @@ footer { margin-top: 72px; padding-top: 18px; border-top: 1px solid var(--rule);
   <h2 id="measured">What is measured</h2>
   <p>Each issue comes from <a href="https://arxiv.org/abs/2602.05892">ContextBench</a>, a 2026 benchmark of real GitHub issues in eight languages, with the lines of code annotators judged necessary to resolve it. A method is given the issue's text and the repository at that commit, and returns files in order. They are kept, in that order, while they fit the budget. The fix itself is never shown.</p>
   <p><b>Recall</b> is the share of the needed files that were kept. If an issue needs four files and a method's selection holds three of them within 32,000 tokens, its recall at 32k is 0.75. Recall alone is easy to game: return everything, and a large enough budget scores 1.0. So <b>precision</b> sits beside it, the share of kept files that were needed. The <b>ceiling</b> is the needed files themselves: below 1.0 whenever they do not fit. <b>Line recall</b>, used where line ranges come in, is the share of the needed lines delivered; a whole file delivers all of its lines. Both are averaged per issue, and an issue where nothing is delivered scores 0.</p>
-  <p>Methods were tuned on 281 issues from 40 repositories. Everything on this page, unless marked otherwise, is from <span data-bind="tasks"></span> further issues from <span data-bind="repos"></span> other repositories, held out until the methods were fixed and run once.</p>
+  <p><b>What “needed” means</b> is not settled, so three definitions are scored. <i>Annotated</i>, the default here: the code people traced from the fix and checked was enough for a model to write one. <i>Edited</i>: the lines the fix itself changed. <i>Explored</i>: the lines that successful agents read, from SWE-Explore, for a minority of issues. They disagree. A perfect choice of the annotated files delivers <span data-bind="agreement.annotated>edited.recall"></span> of the edited files and <span data-bind="agreement.annotated>explored.recall"></span> of the explored ones; a perfect choice of the edited files, <span data-bind="agreement.edited>annotated.recall"></span> of the annotated ones. The order of the methods below is the same under all three.</p>
+  <p>The methods were tuned on other issues. Everything on this page, unless marked otherwise, is from <span data-bind="tasks"></span> issues from <span data-bind="repos"></span> repositories that no method had been run on, run once after the configuration was frozen and the tests written down.</p>
 </section>
 
 <figure class="wide">
@@ -215,9 +218,35 @@ footer { margin-top: 72px; padding-top: 18px; border-top: 1px solid var(--rule);
 </figure>
 
 <section class="col">
+  <h2 id="models">Which model</h2>
+  <p>The same selector was run with three models, each through its provider's own API with prompt caching on and effort set explicitly. Bigger or more deliberate did not help: Haiku matched DeepSeek and beat Sonnet. Sonnet is the most precise and the least complete, a lean it shows on every benchmark here; DeepSeek takes more rounds and writes several times the output.</p>
+</section>
+
+<figure class="wide">
+  <div class="sheet">
+    <div class="fig-head"><p class="fig-title">Recall at 32k: the smallest model is the cheapest and among the best</p></div>
+    <div class="tbl-wrap" id="models-table"></div>
+  </div>
+  <figcaption class="col"><span class="t">Fresh held-out issues, 32,000 tokens.</span> Cost is for all the issues, from measured tokens, cached and uncached, at each provider's published prices. Differences are paired by issue, with 95% intervals from resampling repositories.</figcaption>
+</figure>
+
+<section class="col">
+  <h2 id="elsewhere">On another benchmark</h2>
+  <p><a href="https://arxiv.org/abs/2607.24882">Agent Retrieval Bench</a> asks for the files a coding agent needs next, from a failing trace, a review comment, a pull request's intent or one edited file. Its samples, corpus and evaluator were used unmodified. Nothing here was tuned on it. Its headline measure, budgeted context yield, is the share of needed files that reach an 8,000-token context packed in ranked order.</p>
+</section>
+
+<figure class="wide">
+  <div class="sheet">
+    <div class="fig-head"><p class="fig-title">On a different benchmark, the model selector delivers the most within 8,000 tokens</p></div>
+    <div class="tbl-wrap" id="arb-table"></div>
+  </div>
+  <figcaption class="col"><span class="t">All 345 positive samples, scored by the benchmark's own evaluator.</span> Repo2Txt's rows are its 8k selection followed by the lexical ranking. The published rows are from the benchmark's paper and its community results. The lexical default transfers less well: one of its signals ranks tests last, which is wrong when the task is to find tests.</figcaption>
+</figure>
+
+<section class="col">
   <h2 id="lexical">Lexical ranking: three things a word count misses</h2>
   <p>BM25 scores a file by the words it shares with the issue. But issues are not search queries. They name files outright, quote identifiers in backticks, and describe behaviour that tests and documentation also describe. Three signals were added: a file the issue names comes first; a file that defines a named identifier is lifted above files that merely use it; and tests, examples and prose rank below code.</p>
-  <p>On the held-out issues they take recall at 32,000 tokens from <span class="num" data-bind="curve.bm25-plain.32000.recall"></span> to <span class="num" data-bind="curve.bm25.32000.recall"></span>, for no cost at run time. This is the default for <code>repo2txt select</code>. Its weakness is precision: it fills whatever budget it is given.</p>
+  <p>On the fresh held-out issues they take recall at 32,000 tokens from <span class="num" data-bind="curve.bm25-plain.32000.recall"></span> to <span class="num" data-bind="curve.bm25.32000.recall"></span>, for no cost at run time. This is the default for <code>repo2txt select</code>. Its weakness is precision: it fills whatever budget it is given.</p>
 
   <h2 id="model">Why the model first stopped at three files</h2>
   <p>The first model selector showed Claude Haiku 5.5 the directory tree with token counts and let it choose. It named a median of three files, used 14,000 of 32,000 tokens, and stopped. Of the 233 needed files it missed on the tuning issues, a third were in the lexical ranker's top 30, which the model never saw. Seeing a file in the tree barely helped: it found 43% of the needed files shown to it and 39% of those hidden in collapsed directories.</p>
@@ -231,7 +260,7 @@ footer { margin-top: 72px; padding-top: 18px; border-top: 1px solid var(--rule);
     <div class="fig-head"><p class="fig-title">Two ideas carried the gains: the ranking signals, and the recall prompt with its shortlist</p></div>
     <div id="changes"></div>
   </div>
-  <figcaption class="col"><span class="t">Recall at 32,000 tokens on the tuning issues, each change compared with what it changed, on the same issues; lines are 95% intervals.</span> Model changes were measured on 100 of the 281 tuning issues, for cost. Filled dots are in the shipped version: orange for the lexical ranker, blue for the model. Note the shortlist: with the first prompt it lowered recall slightly, and added to the rewritten prompt it was worth four points.</figcaption>
+  <figcaption class="col"><span class="t">Recall at 32,000 tokens on the tuning issues, each change compared with what it changed, on the same issues; lines are 95% intervals.</span> Model changes were measured on 100 of the 281 tuning issues, for cost. Filled dots are in the shipped version: orange for the lexical ranker, blue for the model. Note the shortlist: with the first prompt it lowered recall slightly, and added to the rewritten prompt it was worth four points. The last group came with calling models natively: keeping each request's opening stable, so a prompt cache can reuse it, cost recall until the selected paths were put in each tool reply; a prompt written to the common ground of current provider guidance did not help.</figcaption>
 </figure>
 
 <section class="col">
@@ -288,26 +317,30 @@ footer { margin-top: 72px; padding-top: 18px; border-top: 1px solid var(--rule);
 
 <section class="col">
   <h2 id="overturn">What could overturn this</h2>
-  <p><b>Language.</b> Half the tuning issues were Python, which raised the worry that the ranker's signals were fitted to it. On the held-out issues Python was harder than the other languages at 8,000 tokens for both methods (lexical ranker 0.19 against 0.33; model selector 0.33 against 0.64), so the gap is not the ranker's tuning. Python is also over half the held-out issues, so the averages lean on it. What causes it is not established here.</p>
-  <p><b>One run, one model.</b> Each configuration was run once with one small model. How much its choices vary from run to run, and whether a stronger model chooses better, were not measured.</p>
-  <p><b>Memory of the fix.</b> Whether the model had seen these repositories and their fixes in training was not measured. The lexical rows are unaffected; the model rows could be.</p>
-  <p><b>What “needed” means.</b> The needed files are one sufficient set chosen by annotators; other files could serve as well, so a choice scored as imprecise may not be, and precision is probably understated. And the earliest twenty-issue pilot, run before the split existed, included four issues that later fell in the held-out set; no tuning decision was made on the pilot.</p>
+  <p><b>Memory of the fix.</b> Whether the models had seen these repositories and their fixes in training was not measured. The lexical rows are unaffected; the model rows could be.</p>
+  <p><b>Few repositories.</b> The fresh set has <span data-bind="repos"></span> repositories, and a handful carry many of its issues; intervals are wide, and leaving out any one repository moves the main differences by at most 0.02.</p>
+  <p><b>One run each.</b> Four repeat runs elsewhere moved the model selector's mean recall by 0.003, so one run settles an average. A quarter of single issues changed between those runs, so the example at the top is one draw; it was chosen because all three models agreed on it.</p>
+  <p><b>What “needed” means.</b> Each definition is one sufficient set, not the only one, so precision is probably understated. No test of whether a model can fix the issue from what was delivered was run.</p>
+  <p><b>The cost of caching.</b> Keeping each request's opening stable, which is what makes prompt caching work, may still cost about two points of recall on the tuning issues; the interval includes zero.</p>
 
   <h2 id="conclusion">Conclusion</h2>
   <p id="conclusion-text"></p>
-  <p>Two things transfer beyond this tool. A model asked to choose context should be told what a miss costs, because left to itself it stops at the obvious files. And an agent's harness should be judged from transcripts as well as scores: the search tools' failure was a wiring bug, and the average alone would have buried it.</p>
+  <p>Three things transfer beyond this tool. A model asked to choose context should be told what a miss costs, because left to itself it stops at the obvious files. The smallest capable model is the one to measure first: here it was also the best. And a harness should be judged from transcripts and checked against known answers as well as scored: a wiring bug, a mis-scored metric and an adapter that misused a baseline all looked like results until they were read.</p>
 
   <h3>Methods in brief</h3>
-  <p class="small">Model: Claude Haiku 5.5 through Anthropic's OpenAI-compatible endpoint, default sampling, one run per configuration. Budgets are counted in <code>o200k_base</code> tokens; Claude's own tokeniser counts somewhat differently. The line-range method makes one more model call per selection. Intervals: 95%, 2,000 bootstrap resamples of whole repositories. Tuning: 281 issues from 40 repositories; held out: <span data-bind="tasks"></span> issues from <span data-bind="repos"></span> others, run once after every choice was fixed. The full report, with every variant tried and its result, is in the repository.</p>
+  <p class="small">Data: ContextBench at a pinned revision; the fresh held-out set is the full release's issues outside its verified subset, on the held-out side of a split by repository, run once. Models: Claude Haiku 5.5 and Sonnet 5.5 at medium effort, DeepSeek flash at high (its lowest honoured level), each through its provider's own API with prompt caching, one run per configuration. Haiku at 128,000 tokens was added after the pre-registered runs. Budgets are counted in <code>o200k_base</code> tokens; each provider's tokeniser differs. Intervals: 95%, 4,000 bootstrap resamples of whole repositories. The harness checks oracles, budgets and reproducibility before any number is reported. The full report and the pre-registration are in the repository.</p>
 
   <h2>Reproduce it</h2>
-  <div class="repro">uv sync --all-extras
-python -m bench.run --split test --unseal --methods smallest,bm25-plain,bm25,oracle,oracle-lines,llm --out test.jsonl
-python -m bench.run --split test --unseal --methods llm-lines --budgets 8k --out test.jsonl
-python -m bench.report test.jsonl</div>
-  <p class="small" style="margin-top:12px">The model runs need <code>LLM_MODEL</code>, <code>LLM_API_KEY</code> and <code>LLM_BASE_URL</code>. One full held-out run used about <span data-bind="cost"></span>.</p>
+  <div class="repro">uv sync --group bench
+python -m bench.check --tasks 12
+python -m bench.run --split test --unseal --subset fresh --tasks 300 \
+  --methods smallest,bm25-plain,bm25,oracle:annotated --out fresh.jsonl
+BENCH_MODEL=haiku BENCH_CLIENT=client.py python -m bench.run --split test --unseal \
+  --subset fresh --tasks 300 --methods llm --budgets 8k,32k --out fresh-llm.jsonl
+python -m bench.report fresh.jsonl</div>
+  <p class="small" style="margin-top:12px">Model runs other than the compatible-endpoint default need a native client file; bench/README.md describes it. The fresh-set model runs cost <span data-bind="cost"></span> in all.</p>
 
-  <footer>Repo2Txt is open source under the MIT licence. Sources: Li et al., <a href="https://arxiv.org/abs/2602.05892">ContextBench</a> (2026); Xia et al., <a href="https://arxiv.org/abs/2407.01489">Agentless</a> (2024); Chroma, <a href="https://www.trychroma.com/research/context-1">Context-1</a> (2026); Anthropic, <a href="https://www.anthropic.com/engineering/writing-tools-for-agents">Writing effective tools for agents</a> (2025).</footer>
+  <footer>Repo2Txt is open source under the MIT licence. Sources: Li et al., <a href="https://arxiv.org/abs/2602.05892">ContextBench</a> (2026); Zhang et al., <a href="https://arxiv.org/abs/2606.07297">SWE-Explore</a> (2026); Qin and Xie, <a href="https://arxiv.org/abs/2607.24882">Agent Retrieval Bench</a> (2026); Xia et al., <a href="https://arxiv.org/abs/2407.01489">Agentless</a> (2024); Chroma, <a href="https://www.trychroma.com/research/context-1">Context-1</a> (2026); Anthropic, <a href="https://www.anthropic.com/engineering/writing-tools-for-agents">Writing effective tools for agents</a> (2025).</footer>
 </section>
 </div>
 
@@ -330,7 +363,7 @@ python -m bench.report test.jsonl</div>
 
   // Numbers in the prose come from the data, so they cannot drift from the charts.
   const usage = (D.cost_tokens || {});
-  D.cost = usage.input ? "$" + (usage.input / 1e6 + 5 * usage.output / 1e6).toFixed(0) + " of model calls at an assumed $1 per million input and $5 per million output tokens" : "–";
+  D.cost = usage.dollars != null ? "$" + usage.dollars.toFixed(2) : "–";
   document.querySelectorAll("[data-bind]").forEach(n => {
     const v = get(n.dataset.bind);
     if (v == null) n.textContent = "–";
@@ -436,7 +469,9 @@ python -m bench.report test.jsonl</div>
     const titles = {
       recall: `The model selector delivers more of the needed files than the lexical ranker at every budget: ${fmt(c.llm[32000].recall)} against ${fmt(c.bm25[32000].recall)} at 32k`,
       precision: `Of what the lexical ranker delivers, ${Math.round(100 * c.bm25[32000].precision)}% was needed at 32k; of the model's choice, ${Math.round(100 * c.llm[32000].precision)}%`,
-      tokens: `The default fills every budget; the model uses ${Math.round(c.llm[128000].tokens / 1000)}k of 128k`,
+      tokens: c.llm[128000]
+        ? `The default fills every budget; the model uses ${Math.round(c.llm[128000].tokens / 1000)}k of 128k`
+        : `The default fills every budget; the model uses ${Math.round(c.llm[32000].tokens / 1000)}k of 32k`,
     };
     document.getElementById("curve-title").textContent = titles[measure];
     const series = ["oracle", "llm", "bm25", "bm25-plain"].filter(m => D.curve[m]);
@@ -460,7 +495,8 @@ python -m bench.report test.jsonl</div>
     const labels = [];
     series.forEach(m => {
       const c = css(METHOD[m].c);
-      const pts = BUDGETS.map((b, i) => [x(i), y(D.curve[m][b][measure]), D.curve[m][b]]);
+      // A method not run at some budget is drawn over the budgets it has.
+      const pts = BUDGETS.map((b, i) => D.curve[m][b] ? [x(i), y(D.curve[m][b][measure]), D.curve[m][b]] : null).filter(Boolean);
       if (measure === "recall" && (m === "llm" || m === "bm25")) {
         const band = pts.map(([px, , d]) => `${px},${y(d.hi)}`).concat(pts.slice().reverse().map(([px, , d]) => `${px},${y(d.lo)}`));
         svg.appendChild(el("polygon", { points: band.join(" "), fill: c, "fill-opacity": 0.1 }));
@@ -468,19 +504,20 @@ python -m bench.report test.jsonl</div>
       svg.appendChild(el("polyline", { points: pts.map(([a, b]) => `${a},${b}`).join(" "), fill: "none", stroke: c, "stroke-width": m === "llm" ? 2.5 : (m === "bm25-plain" ? 1.25 : 2), "stroke-opacity": m === "bm25-plain" ? 0.7 : 1, "stroke-dasharray": m === "oracle" ? "7 5" : "none" }));
       pts.forEach(([px, py, d], i) => {
         const dot = el("circle", { cx: px, cy: py, r: 5, fill: c, stroke: css("--sheet"), "stroke-width": 2 });
-        const tip = el("title", {}, `${METHOD[m].name} at ${k(BUDGETS[i])}: recall ${fmt(d.recall)} (${fmt(d.lo)}–${fmt(d.hi)}), precision ${fmt(d.precision)}, ${d.tokens.toLocaleString("en-GB")} tokens, ${d.files} files`);
+        const tip = el("title", {}, `${METHOD[m].name} at ${k(BUDGETS.filter(b => D.curve[m][b])[i])}: recall ${fmt(d.recall)} (${fmt(d.lo)}–${fmt(d.hi)}), precision ${fmt(d.precision)}, ${d.tokens.toLocaleString("en-GB")} tokens, ${d.files} files`);
         dot.appendChild(tip); svg.appendChild(dot);
       });
-      const last = D.curve[m][128000][measure];
-      labels.push([y(last), m, last, c]);
+      const last = pts[pts.length - 1][2][measure];
+      const at = k(BUDGETS.filter(b => D.curve[m][b]).pop());
+      labels.push([y(last), m, last, c, at]);
     });
     labels.sort((a, b) => a[0] - b[0]);
     for (let i = 1; i < labels.length; i++) labels[i][0] = Math.max(labels[i][0], labels[i - 1][0] + 34);
-    labels.forEach(([ly, m, v, c]) => {
+    labels.forEach(([ly, m, v, c, at]) => {
       svg.appendChild(el("rect", { x: x(2) + 14, y: ly - 7, width: 10, height: 3, rx: 1.5, fill: c }));
       svg.appendChild(el("text", { x: x(2) + 30, y: ly - 1, "font-size": narrow ? 11.5 : 13, "font-weight": 600, fill: css("--ink") }, narrow ? METHOD[m].name.replace("Model selector", "Model").replace("Lexical ranker", "Lexical") : METHOD[m].name));
       svg.appendChild(el("text", { x: x(2) + 30, y: ly + 15, "font-size": 12, fill: css("--muted") },
-        measure === "tokens" ? Math.round(v).toLocaleString("en-GB") + " at 128k" : fmt(v) + " at 128k"));
+        measure === "tokens" ? Math.round(v).toLocaleString("en-GB") + " at " + at : fmt(v) + " at " + at));
     });
     box.appendChild(svg);
   }
@@ -493,7 +530,7 @@ python -m bench.report test.jsonl</div>
     const rows = D.changes;
     const W = Math.max(330, Math.round(box.clientWidth)), narrow = W < 640;
     const rowH = narrow ? 62 : 44, L = narrow ? 8 : 330, R = narrow ? 50 : 70, lo = -0.15, hi = 0.25;
-    const groups = [["lexical", "Lexical ranking, 281 issues"], ["model", "Model selector, 100 issues"]];
+    const groups = [["lexical", "Lexical ranking, 281 issues"], ["model", "Model selector, 100 issues"], ["native", "Calling models natively, 100 issues"]];
     const H = 30 + rows.length * rowH + groups.length * 30 + 50;
     const x = v => L + (W - L - R) * (v - lo) / (hi - lo);
     const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, width: "100%", role: "img", "aria-label": "Change in recall for each change tried" });
@@ -647,7 +684,7 @@ python -m bench.report test.jsonl</div>
     const P = D.pairs || {}, p128 = P["llm-bm25@128000"], p32 = P["llm-bm25@32000"];
     const sign = v => (v >= 0 ? "+" : "−") + fmt(Math.abs(v));
     document.getElementById("curve-caption").innerHTML =
-      `<span class="t">Held-out issues; shaded bands are 95% intervals from resampling whole repositories.</span> ` +
+      `<span class="t">Fresh held-out issues; shaded bands are 95% intervals from resampling whole repositories.</span> ` +
       (p32 && p128 ? `Compared issue by issue, the model selector's lead over the lexical ranker is ${sign(p32.d)} at 32k (${fmt(p32.lo)} to ${fmt(p32.hi)}) and ${sign(p128.d)} at 128k (${fmt(p128.lo)} to ${fmt(p128.hi)}); the bands overlap at 128k only because both methods vary from issue to issue. ` : "") +
       `Switch to precision and tokens to see how differently they get there: the lexical ranker fills the budget, the model selector chooses a shorter list.`;
     const L = c["llm-lines"] && c["llm-lines"][8000], W8 = c.llm[8000], O = c["oracle-lines"] && c["oracle-lines"][8000];
@@ -655,10 +692,39 @@ python -m bench.report test.jsonl</div>
       document.getElementById("lines-title").textContent =
         `Choosing line ranges raises the share of needed lines delivered at 8k from ${fmt(W8.line)} to ${fmt(L.line)}`;
       document.getElementById("lines-caption").innerHTML =
-        `<span class="t">Held-out issues, at 8,000 tokens.</span> The model's line ranges deliver more of what is needed than whole files, chosen lexically or by the model; the needed lines themselves would reach ${fmt(O ? O.line : 1)}, so most of the gap remains. <code>select --method llm --lines</code> prints the ranges, which <code>pack --stdin</code> reads.`;
+        `<span class="t">Fresh held-out issues, at 8,000 tokens.</span> The model's line ranges deliver more of what is needed than whole files, chosen lexically or by the model; the needed lines themselves would reach ${fmt(O ? O.line : 1)}, so most of the gap remains. <code>select --method llm --lines</code> prints the ranges, which <code>pack --stdin</code> reads.`;
     }
     document.getElementById("conclusion-text").textContent =
-      `Choosing what a model reads is a measurable problem with a lot of room left. On issues it never saw, a small model with the right instruction delivers ${fmt(c.llm[32000].recall)} of the needed files at 32,000 tokens, against ${fmt(c.bm25[32000].recall)} for a tuned lexical ranker and a ceiling of ${fmt(c.oracle[32000].recall)}. At 8,000 tokens the limit is the unit: whole files do not fit, and choosing lines does better.`;
+      `Choosing what a model reads is a measurable problem with a lot of room left. On issues no method had seen, a small model with the right instruction delivers ${fmt(c.llm[32000].recall)} of the needed files at 32,000 tokens, against ${fmt(c.bm25[32000].recall)} for a tuned lexical ranker and a ceiling of ${fmt(c.oracle[32000].recall)}; larger models did not do better, and the result held on a benchmark built differently. At 8,000 tokens the limit is the unit: whole files do not fit, and choosing lines does better.`;
+  })();
+
+  (function tables() {
+    const c = D.curve, M = D.models || {}, P = D.pairs || {}, A = D.arb || {};
+    const sign = v => (v >= 0 ? "+" : "−") + fmt(Math.abs(v));
+    const first = 'style="text-align:left"';
+    const models = [["llm", "Claude Haiku 5.5", null], ["llm-deepseek", "DeepSeek flash", "deepseek-llm@32000"], ["llm-sonnet", "Claude Sonnet 5.5", "sonnet-llm@32000"]];
+    let h = `<table><thead><tr><th ${first}>Model</th><th>Recall</th><th>vs Haiku</th><th>Precision</th><th class="opt">Files</th><th class="opt">Rounds</th><th class="opt">Seconds</th><th>Cost</th></tr></thead><tbody>`;
+    models.forEach(([m, name, key]) => {
+      const d = c[m] && c[m][32000], x = M[m] && M[m][32000], p = key && P[key];
+      if (!d) return;
+      h += `<tr><td ${first}>${name}</td><td>${fmt(d.recall)} <span class="small opt">(${fmt(d.lo)}–${fmt(d.hi)})</span></td>` +
+        `<td>${p ? sign(p.d) + ` <span class="small opt">(${sign(p.lo)} to ${sign(p.hi)})</span>` : "–"}</td>` +
+        `<td>${fmt(d.precision)}</td><td class="opt">${d.files}</td><td class="opt">${x ? fmt(x.calls, 1) : "–"}</td>` +
+        `<td class="opt">${x ? Math.round(x.seconds) : "–"}</td><td>${x ? "$" + x.cost.toFixed(2) : "–"}</td></tr>`;
+    });
+    const b = c.bm25[32000];
+    h += `<tr><td ${first}>Lexical default, no model</td><td>${fmt(b.recall)} <span class="small opt">(${fmt(b.lo)}–${fmt(b.hi)})</span></td><td>–</td><td>${fmt(b.precision)}</td><td class="opt">${b.files}</td><td class="opt">–</td><td class="opt">–</td><td>$0</td></tr>`;
+    document.getElementById("models-table").innerHTML = h + "</tbody></table>";
+
+    let t = `<table><thead><tr><th ${first}>Ranking</th><th>Recall@20</th><th>MRR</th><th>Yield at 8k</th></tr></thead><tbody>`;
+    [["llm", "Repo2Txt model selector, Haiku 5.5"], ["llm-deepseek", "Repo2Txt model selector, DeepSeek flash"], ["llm-sonnet", "Repo2Txt model selector, Sonnet 5.5"], ["bm25", "Repo2Txt lexical default"], ["bm25-plain", "Plain BM25 (Repo2Txt's)"]].forEach(([m, name]) => {
+      const r = A[m]; if (!r) return;
+      t += `<tr><td ${first}>${name}</td><td>${fmt(r.recall20)}</td><td>${fmt(r.mrr)}</td><td>${r.bcy8k != null ? fmt(r.bcy8k) : "–"}</td></tr>`;
+    });
+    Object.entries(A.published || {}).forEach(([name, v]) => {
+      t += `<tr><td ${first}>${escapeHtml(name)} <span class="small">published</span></td><td>–</td><td>–</td><td>${fmt(v)}</td></tr>`;
+    });
+    document.getElementById("arb-table").innerHTML = t + "</tbody></table>";
   })();
 
   function escapeHtml(s) { return String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]); }
